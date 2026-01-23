@@ -1,0 +1,138 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum StoreStatus {
+  DRAFT
+  PUBLISHED
+  SUSPENDED
+}
+
+enum ProductStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum MemberRole {
+  PRODUCER
+  TENANT_ADMIN
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships Membership[]
+  tenants     Tenant[]
+}
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  ownerId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner   User         @relation(fields: [ownerId], references: [id])
+  members Membership[]
+  stores  Store[]
+}
+
+model Membership {
+  id        String     @id @default(cuid())
+  tenantId  String
+  userId    String
+  role      MemberRole @default(PRODUCER)
+  createdAt DateTime   @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([tenantId, userId])
+}
+
+model Store {
+  id           String      @id @default(cuid())
+  tenantId     String
+  slug         String      @unique
+  name         String
+  status       StoreStatus @default(DRAFT)
+  subdomain    String      @unique
+  customDomain String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id])
+  pages     Page[]
+  products  Product[]
+  storeTags StoreTag[]
+}
+
+model Page {
+  id        String   @id @default(cuid())
+  storeId   String
+  slug      String
+  title     String
+  content   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@unique([storeId, slug])
+}
+
+model Product {
+  id          String        @id @default(cuid())
+  storeId     String
+  slug        String
+  title       String
+  description String?
+  priceCents  Int
+  currency    String        @default("USD")
+  status      ProductStatus @default(DRAFT)
+  media       Json?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  store       Store        @relation(fields: [storeId], references: [id])
+  productTags ProductTag[]
+
+  @@unique([storeId, slug])
+}
+
+model Tag {
+  id    String @id @default(cuid())
+  slug  String @unique
+  name  String
+  tier  Int    @default(1) // 1=A, 2=B, 3=C
+  flags Json?
+
+  storeTags   StoreTag[]
+  productTags ProductTag[]
+}
+
+model StoreTag {
+  storeId String
+  tagId   String
+  store   Store  @relation(fields: [storeId], references: [id])
+  tag     Tag    @relation(fields: [tagId], references: [id])
+
+  @@id([storeId, tagId])
+}
+
+model ProductTag {
+  productId String
+  tagId     String
+  product   Product @relation(fields: [productId], references: [id])
+  tag       Tag     @relation(fields: [tagId], references: [id])
+
+  @@id([productId, tagId])
+}
