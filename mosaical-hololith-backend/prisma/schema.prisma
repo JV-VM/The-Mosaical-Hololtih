@@ -6,43 +6,28 @@ datasource db {
   provider = "postgresql"
 }
 
-enum StoreStatus {
-  DRAFT
-  PUBLISHED
-  SUSPENDED
-}
-
-enum ProductStatus {
-  DRAFT
-  PUBLISHED
-}
-
-enum MemberRole {
-  PRODUCER
-  TENANT_ADMIN
-}
-
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  memberships Membership[]
-  tenants     Tenant[]
+  id               String       @id @default(cuid())
+  email            String       @unique
+  passwordHash     String
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  refreshTokenHash String?
+  memberships      Membership[]
+  tenants          Tenant[]
 }
 
 model Tenant {
-  id        String   @id @default(cuid())
+  id        String       @id @default(cuid())
   name      String
   ownerId   String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  members   Membership[]
+  stores    Store[]
+  owner     User         @relation(fields: [ownerId], references: [id])
 
-  owner   User         @relation(fields: [ownerId], references: [id])
-  members Membership[]
-  stores  Store[]
+  subscriptions Subscription[]
 }
 
 model Membership {
@@ -51,9 +36,8 @@ model Membership {
   userId    String
   role      MemberRole @default(PRODUCER)
   createdAt DateTime   @default(now())
-
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  user   User   @relation(fields: [userId], references: [id])
+  tenant    Tenant     @relation(fields: [tenantId], references: [id])
+  user      User       @relation(fields: [userId], references: [id])
 
   @@unique([tenantId, userId])
 }
@@ -68,26 +52,27 @@ model Store {
   customDomain String?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
-
-  tenant    Tenant     @relation(fields: [tenantId], references: [id])
-  pages     Page[]
-  products  Product[]
-  storeTags StoreTag[]
+  pages        Page[]
+  products     Product[]
+  tenant       Tenant      @relation(fields: [tenantId], references: [id])
+  storeTags    StoreTag[]
 }
 
 model Page {
-  id        String   @id @default(cuid())
+  id        String     @id @default(cuid())
   storeId   String
   slug      String
   title     String
   content   Json
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  status    PageStatus @default(DRAFT)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 
   store Store @relation(fields: [storeId], references: [id])
 
   @@unique([storeId, slug])
 }
+
 
 model Product {
   id          String        @id @default(cuid())
@@ -101,23 +86,23 @@ model Product {
   media       Json?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
-
-  store       Store        @relation(fields: [storeId], references: [id])
+  store       Store         @relation(fields: [storeId], references: [id])
   productTags ProductTag[]
 
   @@unique([storeId, slug])
 }
 
 model Tag {
-  id    String @id @default(cuid())
-  slug  String @unique
-  name  String
-  tier  Int    @default(1) // 1=A, 2=B, 3=C
-  flags Json?
-
-  storeTags   StoreTag[]
+  id          String       @id @default(cuid())
+  slug        String       @unique
+  name        String
+  tier        Int          @default(1)
+  flags       Json?
   productTags ProductTag[]
+  storeTags   StoreTag[]
 }
+
+
 
 model StoreTag {
   storeId String
@@ -135,4 +120,54 @@ model ProductTag {
   tag       Tag     @relation(fields: [tagId], references: [id])
 
   @@id([productId, tagId])
+}
+
+
+model Plan {
+  id        String   @id @default(cuid())
+  code      String   @unique // "free" | "starter" | "pro" | "business"
+  name      String
+  quotas    Json     // { maxStores, maxProductsPerStore, maxProductsTotal, maxTagTier }
+  features  Json?    // future flags: customDomain, analyticsLevel, etc.
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id        String             @id @default(cuid())
+  tenantId  String             @unique
+  planId    String
+  status    SubscriptionStatus @default(ACTIVE)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  plan   Plan   @relation(fields: [planId], references: [id])
+}
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+}
+
+enum StoreStatus {
+  DRAFT
+  PUBLISHED
+  SUSPENDED
+}
+
+enum ProductStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum MemberRole {
+  PRODUCER
+  TENANT_ADMIN
+}
+
+enum PageStatus {
+  DRAFT
+  PUBLISHED
 }

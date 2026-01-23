@@ -16,6 +16,7 @@ import { MediaModule } from './media/media.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { HealthController } from './shared/health/health.controller';
 
+
 @Module({
   imports: [
     // still useful for Nest conventions; we validate with Zod in env.ts
@@ -36,5 +37,6 @@ import { HealthController } from './shared/health/health.controller';
     AnalyticsModule,
   ],
   controllers: [HealthController],
+  providers: [],
 })
 export class AppModule {}

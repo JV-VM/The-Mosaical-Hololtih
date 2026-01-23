@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "blocks": [
+    { "type": "heading", "data": { "level": 1, "text": "About us" } },
+    { "type": "paragraph", "data": { "text": "We sell..." } },
+    { "type": "image", "data": { "url": "https://...", "alt": "..." } },
+    { "type": "button", "data": { "label": "Contact", "href": "/contact" } }
+  ]
+}
