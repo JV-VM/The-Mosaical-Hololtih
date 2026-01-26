@@ -4,31 +4,56 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { PageStatus, Prisma, StoreStatus } from '@prisma/client';
 import { PrismaService } from '../shared/prisma/prisma.service';
-import { PageStatus, StoreStatus } from '@prisma/client';
+import { assertValidContent } from './page-content';
 
+const pageSelect = {
+  id: true,
+  storeId: true,
+  slug: true,
+  title: true,
+  status: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
-function validateContentShape(content: any) {
-  if (!content || typeof content !== 'object') return false;
-  if (typeof content.version !== 'number') return false;
-  if (!Array.isArray(content.blocks)) return false;
-  return true;
-}
+const publicPageSelect = {
+  id: true,
+  slug: true,
+  title: true,
+  content: true,
+  status: true,
+  updatedAt: true,
+} as const;
+
+const storeSelect = {
+  id: true,
+  tenantId: true,
+  status: true,
+  slug: true,
+  name: true,
+} as const;
 
 @Injectable()
 export class PagesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private async ensureSlugAvailableForStore(params: {
+    storeId: string;
+    slug: string;
+  }) {
+    const exists = await this.prisma.page.findUnique({
+      where: { storeId_slug: { storeId: params.storeId, slug: params.slug } },
+    });
+    if (exists)
+      throw new BadRequestException('Page slug already in use for this store');
+  }
+
   private async assertStoreBelongsToTenant(storeId: string, tenantId: string) {
     const store = await this.prisma.store.findUnique({
       where: { id: storeId },
-      select: {
-        id: true,
-        tenantId: true,
-        status: true,
-        slug: true,
-        name: true,
-      },
+      select: storeSelect,
     });
     if (!store) throw new NotFoundException('Store not found');
     if (store.tenantId !== tenantId)
@@ -54,6 +79,39 @@ export class PagesService {
     return page;
   }
 
+  private async getPublishedStoreBySlug(storeSlug: string) {
+    const store = await this.prisma.store.findUnique({
+      where: { slug: storeSlug },
+      select: { id: true, status: true, slug: true, name: true },
+    });
+
+    if (!store || store.status !== StoreStatus.PUBLISHED) {
+      throw new NotFoundException('Store not found');
+    }
+
+    return store;
+  }
+
+  private async getPublishedPageForStore(params: {
+    storeId: string;
+    pageSlug: string;
+  }) {
+    const page = await this.prisma.page.findFirst({
+      where: {
+        storeId: params.storeId,
+        slug: params.pageSlug,
+        status: PageStatus.PUBLISHED,
+      },
+      select: publicPageSelect,
+    });
+
+    if (!page) {
+      throw new NotFoundException('Page not found');
+    }
+
+    return page;
+  }
+
   // ---- dashboard ----
 
   async createPage(params: {
@@ -61,39 +119,28 @@ export class PagesService {
     storeId: string;
     title: string;
     slug: string;
-    content: any;
+    content: unknown;
   }) {
     await this.assertStoreBelongsToTenant(params.storeId, params.tenantId);
 
-    if (!validateContentShape(params.content)) {
-      throw new BadRequestException(
-        'Invalid content shape. Expected { version:number, blocks:any[] }',
-      );
-    }
+    assertValidContent(params.content);
 
-    const exists = await this.prisma.page.findUnique({
-      where: { storeId_slug: { storeId: params.storeId, slug: params.slug } },
+    await this.ensureSlugAvailableForStore({
+      storeId: params.storeId,
+      slug: params.slug,
     });
-    if (exists)
-      throw new BadRequestException('Page slug already in use for this store');
+
+    const persistenceContent = params.content as Prisma.InputJsonValue;
 
     return this.prisma.page.create({
       data: {
         storeId: params.storeId,
         title: params.title,
         slug: params.slug,
-        content: params.content,
+        content: persistenceContent,
         status: PageStatus.DRAFT,
       },
-      select: {
-        id: true,
-        storeId: true,
-        title: true,
-        slug: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: pageSelect,
     });
   }
 
@@ -107,22 +154,14 @@ export class PagesService {
         store: { tenantId: params.tenantId },
       },
       orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        storeId: true,
-        slug: true,
-        title: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: pageSelect,
     });
   }
 
   async updatePage(params: {
     tenantId: string;
     pageId: string;
-    patch: { title?: string; slug?: string; content?: any };
+    patch: { title?: string; slug?: string; content?: unknown };
   }) {
     const page = await this.assertPageBelongsToTenant(
       params.pageId,
@@ -130,42 +169,29 @@ export class PagesService {
     );
 
     if (params.patch.slug && params.patch.slug !== page.slug) {
-      const exists = await this.prisma.page.findUnique({
-        where: {
-          storeId_slug: { storeId: page.storeId, slug: params.patch.slug },
-        },
+      await this.ensureSlugAvailableForStore({
+        storeId: page.storeId,
+        slug: params.patch.slug,
       });
-      if (exists)
-        throw new BadRequestException(
-          'Page slug already in use for this store',
-        );
     }
 
-    if (
-      params.patch.content !== undefined &&
-      !validateContentShape(params.patch.content)
-    ) {
-      throw new BadRequestException(
-        'Invalid content shape. Expected { version:number, blocks:any[] }',
-      );
+    if (params.patch.content !== undefined) {
+      assertValidContent(params.patch.content);
     }
+
+    const persistenceContent: Prisma.InputJsonValue | undefined =
+      params.patch.content === undefined
+        ? undefined
+        : (params.patch.content as Prisma.InputJsonValue);
 
     return this.prisma.page.update({
       where: { id: params.pageId },
       data: {
         title: params.patch.title,
         slug: params.patch.slug,
-        content: params.patch.content,
+        content: persistenceContent,
       },
-      select: {
-        id: true,
-        storeId: true,
-        slug: true,
-        title: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: pageSelect,
     });
   }
 
@@ -192,30 +218,11 @@ export class PagesService {
   // ---- public ----
 
   async publicGetPageBySlug(params: { storeSlug: string; pageSlug: string }) {
-    const store = await this.prisma.store.findUnique({
-      where: { slug: params.storeSlug },
-      select: { id: true, status: true, slug: true, name: true },
+    const store = await this.getPublishedStoreBySlug(params.storeSlug);
+    const page = await this.getPublishedPageForStore({
+      storeId: store.id,
+      pageSlug: params.pageSlug,
     });
-
-    if (!store || store.status !== StoreStatus.PUBLISHED) {
-      throw new NotFoundException('Store not found');
-    }
-
-    const page = await this.prisma.page.findUnique({
-      where: { storeId_slug: { storeId: store.id, slug: params.pageSlug } },
-      select: {
-        id: true,
-        slug: true,
-        title: true,
-        content: true,
-        status: true,
-        updatedAt: true,
-      },
-    });
-
-    if (!page || page.status !== PageStatus.PUBLISHED) {
-      throw new NotFoundException('Page not found');
-    }
 
     return {
       store: { slug: store.slug, name: store.name },

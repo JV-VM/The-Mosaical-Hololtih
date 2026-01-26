@@ -1,5 +1,16 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
-import express from 'express';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import type { Request } from 'express';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantMemberGuard } from '../tenants/guards/tenant-member.guard';
@@ -11,14 +22,22 @@ import { UpdatePageDto } from './dto/update-page.dto';
 export class PagesController {
   constructor(private readonly pages: PagesService) {}
 
+  private getTenantIdOrThrow(req: RequestWithTenantId): string {
+    if (!req.tenantId) {
+      throw new ForbiddenException('Missing tenant context');
+    }
+
+    return req.tenantId;
+  }
+
   // -----------------------
   // Dashboard (tenant scoped)
   // -----------------------
 
   @UseGuards(JwtAuthGuard, TenantMemberGuard)
   @Post('pages')
-  create(@Req() req: express.Request, @Body() dto: CreatePageDto) {
-    const tenantId = req.tenantId!;
+  create(@Req() req: RequestWithTenantId, @Body() dto: CreatePageDto) {
+    const tenantId = this.getTenantIdOrThrow(req);
     return this.pages.createPage({
       tenantId,
       storeId: dto.storeId,
@@ -30,15 +49,19 @@ export class PagesController {
 
   @UseGuards(JwtAuthGuard, TenantMemberGuard)
   @Get('pages')
-  list(@Req() req: express.Request, @Query('storeId') storeId?: string) {
-    const tenantId = req.tenantId!;
+  list(@Req() req: RequestWithTenantId, @Query('storeId') storeId?: string) {
+    const tenantId = this.getTenantIdOrThrow(req);
     return this.pages.listPages({ tenantId, storeId });
   }
 
   @UseGuards(JwtAuthGuard, TenantMemberGuard)
   @Patch('pages/:id')
-  update(@Req() req: express.Request, @Param('id') id: string, @Body() dto: UpdatePageDto) {
-    const tenantId = req.tenantId!;
+  update(
+    @Req() req: RequestWithTenantId,
+    @Param('id') id: string,
+    @Body() dto: UpdatePageDto,
+  ) {
+    const tenantId = this.getTenantIdOrThrow(req);
     return this.pages.updatePage({
       tenantId,
       pageId: id,
@@ -52,15 +75,15 @@ export class PagesController {
 
   @UseGuards(JwtAuthGuard, TenantMemberGuard)
   @Post('pages/:id/publish')
-  publish(@Req() req: express.Request, @Param('id') id: string) {
-    const tenantId = req.tenantId!;
+  publish(@Req() req: RequestWithTenantId, @Param('id') id: string) {
+    const tenantId = this.getTenantIdOrThrow(req);
     return this.pages.publishPage(tenantId, id);
   }
 
   @UseGuards(JwtAuthGuard, TenantMemberGuard)
   @Post('pages/:id/unpublish')
-  unpublish(@Req() req: express.Request, @Param('id') id: string) {
-    const tenantId = req.tenantId!;
+  unpublish(@Req() req: RequestWithTenantId, @Param('id') id: string) {
+    const tenantId = this.getTenantIdOrThrow(req);
     return this.pages.unpublishPage(tenantId, id);
   }
 
@@ -69,7 +92,11 @@ export class PagesController {
   // -----------------------
 
   @Get('stores/:storeSlug/pages/:pageSlug')
-  publicGet(@Param('storeSlug') storeSlug: string, @Param('pageSlug') pageSlug: string) {
+  publicGet(
+    @Param('storeSlug') storeSlug: string,
+    @Param('pageSlug') pageSlug: string,
+  ) {
     return this.pages.publicGetPageBySlug({ storeSlug, pageSlug });
   }
 }
+type RequestWithTenantId = Request & { tenantId?: string };

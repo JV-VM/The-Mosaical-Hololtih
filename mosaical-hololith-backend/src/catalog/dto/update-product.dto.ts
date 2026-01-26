@@ -1,4 +1,11 @@
-import { IsInt, IsOptional, IsString, Matches, Min, MinLength } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Min,
+  MinLength,
+} from 'class-validator';
 
 export class UpdateProductDto {
   @IsOptional()
@@ -8,12 +15,14 @@ export class UpdateProductDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, { message: 'slug must be lowercase kebab-case' })
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message: 'slug must be lowercase kebab-case',
+  })
   slug?: string;
 
   @IsOptional()
   @IsString()
-  description?: string;
+  description?: string | null;
 
   @IsOptional()
   @IsInt()
@@ -25,5 +34,5 @@ export class UpdateProductDto {
   currency?: string;
 
   @IsOptional()
-  media?: any;
+  media?: unknown;
 }

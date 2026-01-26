@@ -6,6 +6,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { Prisma } from '@prisma/client';
 
 export class CreateTagDto {
   @IsString()
@@ -25,5 +26,5 @@ export class CreateTagDto {
   tier?: number;
 
   @IsOptional()
-  flags?: any; // JSON blob
+  flags?: Prisma.InputJsonValue; // JSON blob
 }

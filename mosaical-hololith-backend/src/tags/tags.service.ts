@@ -4,9 +4,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PrismaService } from '../shared/prisma/prisma.service';
+import { Prisma, ProductStatus, StoreStatus } from '@prisma/client';
 import { PlansService } from '../plans/plans.service';
-import { ProductStatus, StoreStatus } from '@prisma/client';
+import { PrismaService } from '../shared/prisma/prisma.service';
 
 @Injectable()
 export class TagsService {
@@ -47,6 +47,27 @@ export class TagsService {
     return tag;
   }
 
+  private async assertTenantCanUseTag(tenantId: string, tagId: string) {
+    const tag = await this.getTagOrThrow(tagId);
+    await this.assertTagAllowedForTenant(tenantId, tag.tier);
+    return tag;
+  }
+
+  private async deleteIfExists<T>(fn: () => Promise<T>): Promise<void> {
+    try {
+      await fn();
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
+        return;
+      }
+
+      throw error;
+    }
+  }
+
   // --- tier gating stub (hook for Task 8) ---
   // For now: allow everything. Later: enforce based on tenant plan.
   private async assertTagAllowedForTenant(tenantId: string, tagTier: number) {
@@ -69,40 +90,41 @@ export class TagsService {
     if (!tag) throw new NotFoundException('Tag not found');
 
     // Only show published stores/products
-    const stores = await this.prisma.store.findMany({
-      where: {
-        status: StoreStatus.PUBLISHED,
-        storeTags: { some: { tagId: tag.id } },
-      },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        slug: true,
-        name: true,
-        subdomain: true,
-        customDomain: true,
-        createdAt: true,
-      },
-    });
-
-    const products = await this.prisma.product.findMany({
-      where: {
-        status: ProductStatus.PUBLISHED,
-        productTags: { some: { tagId: tag.id } },
-        store: { status: StoreStatus.PUBLISHED },
-      },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        slug: true,
-        title: true,
-        priceCents: true,
-        currency: true,
-        media: true,
-        createdAt: true,
-        store: { select: { slug: true, name: true } },
-      },
-    });
+    const [stores, products] = await Promise.all([
+      this.prisma.store.findMany({
+        where: {
+          status: StoreStatus.PUBLISHED,
+          storeTags: { some: { tagId: tag.id } },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          slug: true,
+          name: true,
+          subdomain: true,
+          customDomain: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.product.findMany({
+        where: {
+          status: ProductStatus.PUBLISHED,
+          productTags: { some: { tagId: tag.id } },
+          store: { status: StoreStatus.PUBLISHED },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          slug: true,
+          title: true,
+          priceCents: true,
+          currency: true,
+          media: true,
+          createdAt: true,
+          store: { select: { slug: true, name: true } },
+        },
+      }),
+    ]);
 
     return { tag, stores, products };
   }
@@ -112,7 +134,7 @@ export class TagsService {
     name: string;
     slug: string;
     tier?: number;
-    flags?: any;
+    flags?: Prisma.InputJsonValue;
   }) {
     const existing = await this.prisma.tag.findUnique({
       where: { slug: params.slug },
@@ -137,8 +159,7 @@ export class TagsService {
     tagId: string;
   }) {
     await this.assertStoreBelongsToTenant(params.storeId, params.tenantId);
-    const tag = await this.getTagOrThrow(params.tagId);
-    await this.assertTagAllowedForTenant(params.tenantId, tag.tier);
+    await this.assertTenantCanUseTag(params.tenantId, params.tagId);
 
     return this.prisma.storeTag.upsert({
       where: {
@@ -157,13 +178,13 @@ export class TagsService {
     await this.assertStoreBelongsToTenant(params.storeId, params.tenantId);
 
     // delete if exists; return ok either way for idempotency
-    await this.prisma.storeTag
-      .delete({
+    await this.deleteIfExists(() =>
+      this.prisma.storeTag.delete({
         where: {
           storeId_tagId: { storeId: params.storeId, tagId: params.tagId },
         },
-      })
-      .catch(() => null);
+      }),
+    );
 
     return { ok: true };
   }
@@ -174,8 +195,7 @@ export class TagsService {
     tagId: string;
   }) {
     await this.assertProductBelongsToTenant(params.productId, params.tenantId);
-    const tag = await this.getTagOrThrow(params.tagId);
-    await this.assertTagAllowedForTenant(params.tenantId, tag.tier);
+    await this.assertTenantCanUseTag(params.tenantId, params.tagId);
 
     return this.prisma.productTag.upsert({
       where: {
@@ -193,13 +213,13 @@ export class TagsService {
   }) {
     await this.assertProductBelongsToTenant(params.productId, params.tenantId);
 
-    await this.prisma.productTag
-      .delete({
+    await this.deleteIfExists(() =>
+      this.prisma.productTag.delete({
         where: {
           productId_tagId: { productId: params.productId, tagId: params.tagId },
         },
-      })
-      .catch(() => null);
+      }),
+    );
 
     return { ok: true };
   }

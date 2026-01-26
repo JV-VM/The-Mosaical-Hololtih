@@ -16,12 +16,20 @@ import rateLimit from '@fastify/rate-limit';
 import { AppModule } from './app.module';
 import { env } from './shared/env';
 
-async function bootstrap() {
-  const app = await NestFactory.create<NestFastifyApplication>(
-    AppModule,
-    new FastifyAdapter(),
-  );
+const API_PREFIX = 'api/v1';
+const ANALYTICS_VIEW_PATH = `/${API_PREFIX}/analytics/view`;
+const RATE_LIMIT_DEFAULT = { max: 200, timeWindow: '1 minute' } as const;
+const RATE_LIMIT_ANALYTICS_VIEW = { max: 60, timeWindow: '1 minute' } as const;
 
+type RouteOptionsLike = {
+  url: string;
+  method: string | string[];
+  config?: Record<string, unknown> & {
+    rateLimit?: typeof RATE_LIMIT_ANALYTICS_VIEW;
+  };
+};
+
+const setupValidation = (app: NestFastifyApplication) => {
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -29,14 +37,33 @@ async function bootstrap() {
       transform: true,
     }),
   );
+};
 
+const setupSecurity = async (app: NestFastifyApplication) => {
   await app.register(helmet);
   await app.register(cors, { origin: env.CORS_ORIGIN, credentials: true });
-  await app.register(rateLimit, { max: 200, timeWindow: '1 minute' });
+};
 
-  app.setGlobalPrefix('api/v1');
+const setupRateLimit = async (app: NestFastifyApplication) => {
+  await app.register(rateLimit, {
+    global: false,
+    ...RATE_LIMIT_DEFAULT,
+  });
 
-  // ✅ Swagger
+  const fastify = app.getHttpAdapter().getInstance();
+
+  fastify.addHook('onRoute', (routeOptions: RouteOptionsLike) => {
+    if (
+      routeOptions.url === ANALYTICS_VIEW_PATH &&
+      routeOptions.method === 'POST'
+    ) {
+      routeOptions.config = routeOptions.config ?? {};
+      routeOptions.config.rateLimit = RATE_LIMIT_ANALYTICS_VIEW;
+    }
+  });
+};
+
+const setupSwagger = (app: NestFastifyApplication) => {
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Mosaical Hololith API')
     .setDescription(
@@ -51,10 +78,23 @@ async function bootstrap() {
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('/docs', app, document);
+};
 
+async function bootstrap() {
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter(),
+  );
+
+  setupValidation(app);
+  await setupSecurity(app);
+  await setupRateLimit(app);
+  setupSwagger(app);
+
+  app.setGlobalPrefix(API_PREFIX);
   await app.listen(env.PORT, '0.0.0.0');
   console.log(`API running on http://localhost:${env.PORT}/api/v1`);
   console.log(`Swagger on http://localhost:${env.PORT}/docs`);
 }
 
-bootstrap();
+void bootstrap();

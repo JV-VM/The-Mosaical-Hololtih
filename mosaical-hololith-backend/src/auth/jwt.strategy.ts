@@ -4,6 +4,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 
 import { env } from '../shared/env';
 import { UsersService } from '../users/users.service';
+import { AuthUser } from './types/auth-user';
 import { JwtPayload } from './types/jwt-payload';
 
 @Injectable()
@@ -15,7 +16,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     });
   }
 
-  async validate(payload: JwtPayload) {
+  async validate(payload: JwtPayload): Promise<AuthUser> {
     const user = await this.users.findById(payload.sub);
     if (!user) throw new UnauthorizedException('User not found');
 

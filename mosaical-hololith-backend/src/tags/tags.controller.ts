@@ -2,7 +2,9 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
+  Logger,
   Param,
   Post,
   Req,
@@ -12,13 +14,22 @@ import express from 'express';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantMemberGuard } from '../tenants/guards/tenant-member.guard';
+import { env } from '../shared/env';
 import { TagsService } from './tags.service';
 import { CreateTagDto } from './dto/create-tag.dto';
 import { AssignTagDto } from './dto/assign-tag.dto';
 
 @Controller()
 export class TagsController {
+  private readonly logger = new Logger(TagsController.name);
+
   constructor(private readonly tags: TagsService) {}
+
+  private assertAdminOrThrow(req: express.Request) {
+    if (!req.membership || req.membership.role !== 'TENANT_ADMIN') {
+      throw new ForbiddenException('Admin access required');
+    }
+  }
 
   // -----------------------
   // Public
@@ -37,8 +48,18 @@ export class TagsController {
   // -----------------------
   // MVP Admin/Seed (lock later)
   // -----------------------
+  @UseGuards(JwtAuthGuard, TenantMemberGuard)
   @Post('admin/tags')
-  create(@Body() dto: CreateTagDto) {
+  create(@Req() req: express.Request, @Body() dto: CreateTagDto) {
+    if (env.NODE_ENV === 'production') {
+      throw new ForbiddenException('Not available in production');
+    }
+
+    this.assertAdminOrThrow(req);
+    this.logger.log(
+      `admin tag seed tenantId=${req.tenantId} membershipId=${req.membership?.id}`,
+    );
+
     return this.tags.createTag({
       name: dto.name,
       slug: dto.slug,

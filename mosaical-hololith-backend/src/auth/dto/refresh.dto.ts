@@ -1,7 +1,7 @@
-import { IsString, MinLength } from 'class-validator';
+import { IsJWT, IsString } from 'class-validator';
 
 export class RefreshDto {
   @IsString()
-  @MinLength(10)
+  @IsJWT()
   refreshToken!: string;
 }

@@ -5,6 +5,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 
 @Injectable()
@@ -12,9 +13,11 @@ export class TenantMemberGuard implements CanActivate {
   constructor(private readonly prisma: PrismaService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const req = context.switchToHttp().getRequest();
+    const req = context.switchToHttp().getRequest<TenantRequest>();
     const user = req.user as { id: string } | undefined;
-    if (!user?.id) throw new UnauthorizedException();
+    if (!user?.id) {
+      throw new UnauthorizedException();
+    }
 
     const tenantId = (req.headers['x-tenant-id'] as string | undefined)?.trim();
     if (!tenantId) {
@@ -28,8 +31,9 @@ export class TenantMemberGuard implements CanActivate {
       select: { id: true, role: true },
     });
 
-    if (!membership)
+    if (!membership) {
       throw new ForbiddenException('Not a member of this tenant');
+    }
 
     // expose tenant context to downstream handlers
     req.tenantId = tenantId;
@@ -38,3 +42,8 @@ export class TenantMemberGuard implements CanActivate {
     return true;
   }
 }
+
+type TenantRequest = Request & {
+  tenantId?: string;
+  membership?: { id: string; role: string };
+};

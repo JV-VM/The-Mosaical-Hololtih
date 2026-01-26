@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../shared/prisma/prisma.service';
 
 export type Quotas = {
@@ -12,11 +13,13 @@ export type Quotas = {
   maxTagTier: number; // 1=A, 2=B, 3=C
 };
 
+type PlanFeatures = Prisma.InputJsonValue;
+
 const DEFAULT_FREE_PLAN: {
   code: string;
   name: string;
   quotas: Quotas;
-  features?: any;
+  features?: PlanFeatures;
 } = {
   code: 'free',
   name: 'Free',
@@ -33,25 +36,44 @@ const DEFAULT_FREE_PLAN: {
 export class PlansService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private formatLimitMessage(
+    params:
+      | { kind: 'maxStores'; value: number }
+      | { kind: 'maxProductsPerStore'; value: number }
+      | { kind: 'maxProductsTotal'; value: number }
+      | { kind: 'maxTagTier'; tagTier: number; maxTagTier: number },
+  ) {
+    if (params.kind === 'maxStores') {
+      return `Plan limit reached: maxStores=${params.value}. Upgrade required.`;
+    }
+
+    if (params.kind === 'maxProductsPerStore') {
+      return `Plan limit reached: maxProductsPerStore=${params.value}. Upgrade required.`;
+    }
+
+    if (params.kind === 'maxProductsTotal') {
+      return `Plan limit reached: maxProductsTotal=${params.value}. Upgrade required.`;
+    }
+
+    return `Tag tier not allowed by plan. tagTier=${params.tagTier}, maxTagTier=${params.maxTagTier}.`;
+  }
+
   // Ensure Free plan exists + tenant has subscription
   async ensureTenantSubscription(tenantId: string) {
-    let plan = await this.prisma.plan.findUnique({
+    const plan = await this.prisma.plan.upsert({
       where: { code: DEFAULT_FREE_PLAN.code },
+      update: {},
+      create: {
+        code: DEFAULT_FREE_PLAN.code,
+        name: DEFAULT_FREE_PLAN.name,
+        quotas: DEFAULT_FREE_PLAN.quotas,
+        features: DEFAULT_FREE_PLAN.features,
+      },
     });
-
-    if (!plan) {
-      plan = await this.prisma.plan.create({
-        data: {
-          code: DEFAULT_FREE_PLAN.code,
-          name: DEFAULT_FREE_PLAN.name,
-          quotas: DEFAULT_FREE_PLAN.quotas,
-          features: DEFAULT_FREE_PLAN.features,
-        },
-      });
-    }
 
     const sub = await this.prisma.subscription.findUnique({
       where: { tenantId },
+      include: { plan: true },
     });
     if (sub) return sub;
 
@@ -61,16 +83,12 @@ export class PlansService {
         planId: plan.id,
         status: 'ACTIVE',
       },
+      include: { plan: true },
     });
   }
 
   async getTenantPlan(tenantId: string) {
-    await this.ensureTenantSubscription(tenantId);
-
-    const sub = await this.prisma.subscription.findUnique({
-      where: { tenantId },
-      include: { plan: true },
-    });
+    const sub = await this.ensureTenantSubscription(tenantId);
 
     if (!sub?.plan) {
       throw new BadRequestException('Subscription/plan missing');
@@ -83,7 +101,7 @@ export class PlansService {
         code: sub.plan.code,
         name: sub.plan.name,
         quotas: sub.plan.quotas as Quotas,
-        features: sub.plan.features ?? {},
+        features: (sub.plan.features as PlanFeatures) ?? {},
       },
     };
   }
@@ -112,7 +130,10 @@ export class PlansService {
 
     if (usage.stores >= plan.quotas.maxStores) {
       throw new ForbiddenException(
-        `Plan limit reached: maxStores=${plan.quotas.maxStores}. Upgrade required.`,
+        this.formatLimitMessage({
+          kind: 'maxStores',
+          value: plan.quotas.maxStores,
+        }),
       );
     }
   }
@@ -127,7 +148,10 @@ export class PlansService {
 
     if (perStoreCount >= plan.quotas.maxProductsPerStore) {
       throw new ForbiddenException(
-        `Plan limit reached: maxProductsPerStore=${plan.quotas.maxProductsPerStore}. Upgrade required.`,
+        this.formatLimitMessage({
+          kind: 'maxProductsPerStore',
+          value: plan.quotas.maxProductsPerStore,
+        }),
       );
     }
 
@@ -136,7 +160,10 @@ export class PlansService {
       totalCount >= plan.quotas.maxProductsTotal
     ) {
       throw new ForbiddenException(
-        `Plan limit reached: maxProductsTotal=${plan.quotas.maxProductsTotal}. Upgrade required.`,
+        this.formatLimitMessage({
+          kind: 'maxProductsTotal',
+          value: plan.quotas.maxProductsTotal,
+        }),
       );
     }
   }
@@ -145,7 +172,11 @@ export class PlansService {
     const { plan } = await this.getTenantPlan(tenantId);
     if (tagTier > plan.quotas.maxTagTier) {
       throw new ForbiddenException(
-        `Tag tier not allowed by plan. tagTier=${tagTier}, maxTagTier=${plan.quotas.maxTagTier}.`,
+        this.formatLimitMessage({
+          kind: 'maxTagTier',
+          tagTier,
+          maxTagTier: plan.quotas.maxTagTier,
+        }),
       );
     }
   }
@@ -158,7 +189,7 @@ export class PlansService {
     code: string;
     name: string;
     quotas: Quotas;
-    features?: any;
+    features?: PlanFeatures;
   }) {
     return this.prisma.plan.upsert({
       where: { code: input.code },

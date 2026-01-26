@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../shared/prisma/prisma.service';
+import { MemberRole } from '@prisma/client';
+
+const TENANT_ADMIN_ROLE = MemberRole.TENANT_ADMIN;
 
 @Injectable()
 export class TenantsService {
@@ -13,7 +16,7 @@ export class TenantsService {
         members: {
           create: {
             userId: params.ownerId,
-            role: 'TENANT_ADMIN',
+            role: TENANT_ADMIN_ROLE,
           },
         },
       },
@@ -24,8 +27,10 @@ export class TenantsService {
   async listMyTenants(userId: string) {
     const memberships = await this.prisma.membership.findMany({
       where: { userId },
-      include: {
-        tenant: true,
+      select: {
+        id: true,
+        role: true,
+        tenant: { select: { id: true, name: true, ownerId: true } },
       },
       orderBy: { createdAt: 'desc' },
     });

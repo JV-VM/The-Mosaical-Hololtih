@@ -6,4 +6,5 @@
     { "type": "image", "data": { "url": "https://...", "alt": "..." } },
     { "type": "button", "data": { "label": "Contact", "href": "/contact" } }
   ]
+  
 }

@@ -56,6 +56,8 @@ model Store {
   products     Product[]
   tenant       Tenant      @relation(fields: [tenantId], references: [id])
   storeTags    StoreTag[]
+
+  analyticsEvents AnalyticsEvent[]
 }
 
 model Page {
@@ -68,26 +70,27 @@ model Page {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
-  store Store @relation(fields: [storeId], references: [id])
+  store           Store            @relation(fields: [storeId], references: [id])
+  analyticsEvents AnalyticsEvent[]
 
   @@unique([storeId, slug])
 }
 
-
 model Product {
-  id          String        @id @default(cuid())
-  storeId     String
-  slug        String
-  title       String
-  description String?
-  priceCents  Int
-  currency    String        @default("USD")
-  status      ProductStatus @default(DRAFT)
-  media       Json?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  store       Store         @relation(fields: [storeId], references: [id])
-  productTags ProductTag[]
+  id              String           @id @default(cuid())
+  storeId         String
+  slug            String
+  title           String
+  description     String?
+  priceCents      Int
+  currency        String           @default("USD")
+  status          ProductStatus    @default(DRAFT)
+  media           Json?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  store           Store            @relation(fields: [storeId], references: [id])
+  productTags     ProductTag[]
+  analyticsEvents AnalyticsEvent[]
 
   @@unique([storeId, slug])
 }
@@ -101,8 +104,6 @@ model Tag {
   productTags ProductTag[]
   storeTags   StoreTag[]
 }
-
-
 
 model StoreTag {
   storeId String
@@ -122,13 +123,12 @@ model ProductTag {
   @@id([productId, tagId])
 }
 
-
 model Plan {
   id        String   @id @default(cuid())
   code      String   @unique // "free" | "starter" | "pro" | "business"
   name      String
-  quotas    Json     // { maxStores, maxProductsPerStore, maxProductsTotal, maxTagTier }
-  features  Json?    // future flags: customDomain, analyticsLevel, etc.
+  quotas    Json // { maxStores, maxProductsPerStore, maxProductsTotal, maxTagTier }
+  features  Json? // future flags: customDomain, analyticsLevel, etc.
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -146,6 +146,37 @@ model Subscription {
   tenant Tenant @relation(fields: [tenantId], references: [id])
   plan   Plan   @relation(fields: [planId], references: [id])
 }
+
+model AnalyticsEvent {
+  id         String             @id @default(cuid())
+  type       AnalyticsEventType
+  storeId    String?
+  productId  String?
+  pageId     String?
+  viewerHash String? // NEW
+  createdAt  DateTime           @default(now())
+
+  store   Store?   @relation(fields: [storeId], references: [id])
+  product Product? @relation(fields: [productId], references: [id])
+  page    Page?    @relation(fields: [pageId], references: [id])
+
+  // NEW: “same viewer, same target, same day” idempotency key
+
+  idempotencyKey String? @unique
+
+  @@index([type, createdAt])
+  @@index([storeId, createdAt])
+  @@index([productId, createdAt])
+  @@index([pageId, createdAt])
+  @@index([viewerHash, createdAt])
+}
+
+enum AnalyticsEventType {
+  STORE_VIEW
+  PRODUCT_VIEW
+  PAGE_VIEW
+}
+
 enum SubscriptionStatus {
   ACTIVE
   CANCELED

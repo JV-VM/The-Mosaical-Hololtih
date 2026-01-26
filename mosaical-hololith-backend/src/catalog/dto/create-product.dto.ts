@@ -1,4 +1,11 @@
-import { IsInt, IsOptional, IsString, Matches, Min, MinLength } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Min,
+  MinLength,
+} from 'class-validator';
 
 export class CreateProductDto {
   @IsString()
@@ -9,7 +16,9 @@ export class CreateProductDto {
   title!: string;
 
   @IsString()
-  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, { message: 'slug must be lowercase kebab-case' })
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message: 'slug must be lowercase kebab-case',
+  })
   slug!: string;
 
   @IsOptional()
@@ -26,5 +35,5 @@ export class CreateProductDto {
 
   // Keep simple for MVP: JSON blob for image URLs/metadata
   @IsOptional()
-  media?: any;
+  media?: unknown;
 }

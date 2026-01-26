@@ -1,4 +1,11 @@
-import { IsObject, IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import { Prisma } from '@prisma/client';
+import {
+  IsObject,
+  IsOptional,
+  IsString,
+  Matches,
+  MinLength,
+} from 'class-validator';
 
 export class UpdatePageDto {
   @IsOptional()
@@ -8,10 +15,12 @@ export class UpdatePageDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, { message: 'slug must be lowercase kebab-case' })
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message: 'slug must be lowercase kebab-case',
+  })
   slug?: string;
 
   @IsOptional()
   @IsObject()
-  content?: any;
+  content?: Prisma.InputJsonValue;
 }
