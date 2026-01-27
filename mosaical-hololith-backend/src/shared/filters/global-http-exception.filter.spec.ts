@@ -1,5 +1,16 @@
 import { ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
 
+jest.mock('../middleware/request-logger.middleware', () => ({
+  logger: {
+    error: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+    trace: jest.fn(),
+  },
+}));
+
+import { logger } from '../middleware/request-logger.middleware';
 import { GlobalHttpExceptionFilter } from './global-http-exception.filter';
 
 type RequestLike = {
@@ -49,6 +60,7 @@ describe('GlobalHttpExceptionFilter', () => {
 
   beforeEach(() => {
     filter = new GlobalHttpExceptionFilter();
+    (logger.error as jest.Mock).mockClear();
   });
 
   it('uses the HttpException status and response payload', () => {
@@ -103,5 +115,9 @@ describe('GlobalHttpExceptionFilter', () => {
       requestId: 'req-2',
     });
     expect(body.message).not.toBe('sensitive details');
+
+    expect(logger.error).toHaveBeenCalled();
+    const logArgs = JSON.stringify((logger.error as jest.Mock).mock.calls);
+    expect(logArgs).not.toContain('sensitive details');
   });
 });

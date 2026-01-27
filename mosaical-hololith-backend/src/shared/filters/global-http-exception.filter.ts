@@ -86,12 +86,23 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
 
     // Non-HTTP exceptions: never leak internal error details to clients.
     const status = HttpStatus.INTERNAL_SERVER_ERROR;
+    const isTestEnv = process.env.NODE_ENV === 'test';
+    const isProdEnv = process.env.NODE_ENV === 'production';
+    const errorPayload =
+      exception instanceof Error
+        ? {
+            type: exception.name,
+            ...(isTestEnv ? {} : { stack: exception.stack }),
+            ...(isProdEnv || isTestEnv ? {} : { message: exception.message }),
+          }
+        : { type: 'UnknownError' };
+
     logger.error(
       {
         requestId,
         statusCode: status,
         path,
-        err: exception,
+        err: errorPayload,
       },
       'unhandled_exception',
     );
