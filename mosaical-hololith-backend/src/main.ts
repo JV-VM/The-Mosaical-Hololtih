@@ -16,6 +16,7 @@ import rateLimit from '@fastify/rate-limit';
 
 import { AppModule } from './app.module';
 import { env } from './shared/env';
+import { logger } from './shared/middleware/request-logger.middleware';
 
 const API_PREFIX = 'api/v1';
 const REQUEST_ID_HEADER = 'x-request-id';
@@ -147,6 +148,16 @@ async function bootstrap() {
     new FastifyAdapter(),
   );
 
+  // Route all Nest logs through the existing Pino instance.
+  app.useLogger({
+    log: (message, context) => logger.info({ context }, message),
+    error: (message, trace, context) =>
+      logger.error({ context, trace }, message),
+    warn: (message, context) => logger.warn({ context }, message),
+    debug: (message, context) => logger.debug({ context }, message),
+    verbose: (message, context) => logger.trace({ context }, message),
+  });
+
   setupValidation(app);
   await setupSecurity(app);
   await setupRateLimit(app);
@@ -155,8 +166,8 @@ async function bootstrap() {
   app.useGlobalFilters(new GlobalHttpExceptionFilter());
   app.setGlobalPrefix(API_PREFIX);
   await app.listen(env.PORT, '0.0.0.0');
-  console.log(`API running on http://localhost:${env.PORT}/api/v1`);
-  console.log(`Swagger on http://localhost:${env.PORT}/docs`);
+  logger.info({ port: env.PORT, prefix: API_PREFIX }, 'api_started');
+  logger.info({ port: env.PORT }, 'swagger_started');
 }
 
 void bootstrap();
