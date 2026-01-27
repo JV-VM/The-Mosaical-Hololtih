@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
 import { PrismaModule } from './shared/prisma/prisma.module';
@@ -15,12 +15,11 @@ import { PlansModule } from './plans/plans.module';
 import { MediaModule } from './media/media.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { HealthController } from './shared/health/health.controller';
-
+import { RequestLoggerMiddleware } from './shared/middleware/request-logger.middleware';
 @Module({
   imports: [
     // still useful for Nest conventions; we validate with Zod in env.ts
     ConfigModule.forRoot({ isGlobal: true }),
-
     PrismaModule,
 
     AuthModule,
@@ -37,4 +36,8 @@ import { HealthController } from './shared/health/health.controller';
   ],
   controllers: [HealthController],
 })
-export class AppModule {}
+export class AppModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(RequestLoggerMiddleware).forRoutes('*');
+  }
+}

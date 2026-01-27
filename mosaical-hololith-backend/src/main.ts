@@ -8,7 +8,7 @@ import {
 } from '@nestjs/platform-fastify';
 
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-
+import { GlobalHttpExceptionFilter } from './shared/filters/global-http-exception.filter';
 import helmet from '@fastify/helmet';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
@@ -91,6 +91,7 @@ async function bootstrap() {
   await setupRateLimit(app);
   setupSwagger(app);
 
+  app.useGlobalFilters(new GlobalHttpExceptionFilter());
   app.setGlobalPrefix(API_PREFIX);
   await app.listen(env.PORT, '0.0.0.0');
   console.log(`API running on http://localhost:${env.PORT}/api/v1`);
