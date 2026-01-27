@@ -9,8 +9,6 @@ import {
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
-import { PrismaClient } from '@prisma/client';
-import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
 import request from 'supertest';
 
@@ -55,15 +53,6 @@ const RATE_LIMIT_AUTH_REFRESH: RateLimitOptions = {
   max: 30,
   timeWindow: '1 minute',
 };
-
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  throw new Error('DATABASE_URL is missing for e2e tests');
-}
-
-const prisma = new PrismaClient({
-  adapter: new PrismaPg({ connectionString }),
-});
 
 const configureApp = async (app: NestFastifyApplication) => {
   app.useGlobalPipes(
@@ -130,7 +119,7 @@ const configureApp = async (app: NestFastifyApplication) => {
   await app.getHttpAdapter().getInstance().ready();
 };
 
-describe('Analytics deduplication', () => {
+describe('Tenant isolation (e2e)', () => {
   let app: NestFastifyApplication;
 
   beforeAll(async () => {
@@ -141,87 +130,59 @@ describe('Analytics deduplication', () => {
 
   afterAll(async () => {
     await app.close();
-    await prisma.$disconnect();
   });
 
-  it('dedupes same viewer on the same day, but counts different viewers and different days', async () => {
+  it('user A cannot access tenant B resources', async () => {
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    const reg = await request(app.getHttpServer())
+    const regA = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
-      .send({ email: `ana+${suffix}@a.com`, password: 'Password123!' })
+      .send({ email: `a+${suffix}@tenants.com`, password: 'Password123!' })
       .expect(201);
 
-    const token = reg.body.accessToken;
+    const regB = await request(app.getHttpServer())
+      .post('/api/v1/auth/register')
+      .send({ email: `b+${suffix}@tenants.com`, password: 'Password123!' })
+      .expect(201);
 
-    const tenant = await request(app.getHttpServer())
+    const tokenA = regA.body.accessToken;
+    const tokenB = regB.body.accessToken;
+
+    const tenantA = await request(app.getHttpServer())
       .post('/api/v1/tenants')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ name: `Tenant ${suffix}` })
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ name: `Tenant A ${suffix}` })
       .expect(201);
 
-    const tenantId = tenant.body.id;
+    const tenantB = await request(app.getHttpServer())
+      .post('/api/v1/tenants')
+      .set('Authorization', `Bearer ${tokenB}`)
+      .send({ name: `Tenant B ${suffix}` })
+      .expect(201);
 
-    const store = await request(app.getHttpServer())
+    const tenantAId = tenantA.body.id;
+    const tenantBId = tenantB.body.id;
+
+    await request(app.getHttpServer())
       .post('/api/v1/stores')
-      .set('Authorization', `Bearer ${token}`)
-      .set('X-Tenant-Id', tenantId)
-      .send({ name: `Store ${suffix}`, slug: `store-${suffix}` })
+      .set('Authorization', `Bearer ${tokenB}`)
+      .set('X-Tenant-Id', tenantBId)
+      .send({ name: `Store B ${suffix}`, slug: `store-b-${suffix}` })
       .expect(201);
 
-    const storeId = store.body.id;
+    const forbidden = await request(app.getHttpServer())
+      .get('/api/v1/stores')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .set('X-Tenant-Id', tenantBId)
+      .expect(403);
 
+    expect(forbidden.body?.message || '').toContain('Not a member of this tenant');
+
+    // Sanity check: A can access its own tenant context
     await request(app.getHttpServer())
-      .post(`/api/v1/stores/${storeId}/publish`)
-      .set('Authorization', `Bearer ${token}`)
-      .set('X-Tenant-Id', tenantId)
-      .expect(201);
-
-    const viewerA = `viewer-a-${suffix}`;
-    const viewerB = `viewer-b-${suffix}`;
-
-    // Same viewer, same day -> 1 event
-    await request(app.getHttpServer())
-      .post('/api/v1/analytics/view')
-      .send({ type: 'STORE_VIEW', storeId, viewerId: viewerA })
-      .expect(201);
-
-    await request(app.getHttpServer())
-      .post('/api/v1/analytics/view')
-      .send({ type: 'STORE_VIEW', storeId, viewerId: viewerA })
-      .expect(201);
-
-    let count = await prisma.analyticsEvent.count({
-      where: { storeId, type: 'STORE_VIEW' },
-    });
-    expect(count).toBe(1);
-
-    // Different viewer, same day -> increments
-    await request(app.getHttpServer())
-      .post('/api/v1/analytics/view')
-      .send({ type: 'STORE_VIEW', storeId, viewerId: viewerB })
-      .expect(201);
-
-    count = await prisma.analyticsEvent.count({
-      where: { storeId, type: 'STORE_VIEW' },
-    });
-    expect(count).toBe(2);
-
-    // Simulate previous day for existing events, then same viewer should count again today
-    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    await prisma.analyticsEvent.updateMany({
-      where: { storeId, type: 'STORE_VIEW' },
-      data: { createdAt: yesterday },
-    });
-
-    await request(app.getHttpServer())
-      .post('/api/v1/analytics/view')
-      .send({ type: 'STORE_VIEW', storeId, viewerId: viewerA })
-      .expect(201);
-
-    count = await prisma.analyticsEvent.count({
-      where: { storeId, type: 'STORE_VIEW' },
-    });
-    expect(count).toBe(3);
+      .get('/api/v1/stores')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .set('X-Tenant-Id', tenantAId)
+      .expect(200);
   });
 });

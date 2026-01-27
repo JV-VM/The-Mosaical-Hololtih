@@ -1,17 +1,142 @@
+import 'dotenv/config';
+
+import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
-import request from 'supertest';
+import {
+  FastifyAdapter,
+  NestFastifyApplication,
+} from '@nestjs/platform-fastify';
+import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
+import rateLimit from '@fastify/rate-limit';
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { randomUUID } from 'crypto';
+import request from 'supertest';
+
 import { AppModule } from '../src/app.module';
+import { env } from '../src/shared/env';
+import { GlobalHttpExceptionFilter } from '../src/shared/filters/global-http-exception.filter';
+
+const API_PREFIX = 'api/v1';
+const REQUEST_ID_HEADER = 'x-request-id';
+const ANALYTICS_VIEW_PATH = `/${API_PREFIX}/analytics/view`;
+const AUTH_REGISTER_PATH = `/${API_PREFIX}/auth/register`;
+const AUTH_LOGIN_PATH = `/${API_PREFIX}/auth/login`;
+const AUTH_REFRESH_PATH = `/${API_PREFIX}/auth/refresh`;
+
+type RateLimitOptions = { max: number; timeWindow: string };
+
+type RouteOptionsLike = {
+  url: string;
+  method: string | string[];
+  config?: Record<string, unknown> & {
+    rateLimit?: RateLimitOptions;
+  };
+};
+
+const RATE_LIMIT_DEFAULT: RateLimitOptions = {
+  max: 200,
+  timeWindow: '1 minute',
+};
+const RATE_LIMIT_ANALYTICS_VIEW: RateLimitOptions = {
+  max: 60,
+  timeWindow: '1 minute',
+};
+const RATE_LIMIT_AUTH_REGISTER: RateLimitOptions = {
+  max: 5,
+  timeWindow: '1 minute',
+};
+const RATE_LIMIT_AUTH_LOGIN: RateLimitOptions = {
+  max: 10,
+  timeWindow: '1 minute',
+};
+const RATE_LIMIT_AUTH_REFRESH: RateLimitOptions = {
+  max: 30,
+  timeWindow: '1 minute',
+};
+
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error('DATABASE_URL is missing for e2e tests');
+}
+
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString }),
+});
+
+const configureApp = async (app: NestFastifyApplication) => {
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
+
+  await app.register(helmet);
+  await app.register(cors, { origin: env.CORS_ORIGIN, credentials: true });
+  await app.register(rateLimit, { global: false, ...RATE_LIMIT_DEFAULT });
+
+  const fastify = app.getHttpAdapter().getInstance();
+
+  fastify.addHook('onRequest', (req: any, reply: any, done: () => void) => {
+    const headerRequestId = req.headers?.[REQUEST_ID_HEADER];
+    const headerRequestIdValue =
+      typeof headerRequestId === 'string' && headerRequestId.trim().length > 0
+        ? headerRequestId
+        : undefined;
+
+    const requestId = req.id ?? headerRequestIdValue ?? randomUUID();
+    req.id = requestId;
+    reply.header(REQUEST_ID_HEADER, requestId);
+    done();
+  });
+
+  fastify.addHook('onRoute', (routeOptions: RouteOptionsLike) => {
+    const methods = Array.isArray(routeOptions.method)
+      ? routeOptions.method
+      : [routeOptions.method];
+    const isPost = methods.includes('POST');
+
+    const setRateLimit = (options: RateLimitOptions) => {
+      routeOptions.config = routeOptions.config ?? {};
+      routeOptions.config.rateLimit = options;
+    };
+
+    if (isPost && routeOptions.url === ANALYTICS_VIEW_PATH) {
+      setRateLimit(RATE_LIMIT_ANALYTICS_VIEW);
+      return;
+    }
+
+    if (isPost && routeOptions.url === AUTH_REGISTER_PATH) {
+      setRateLimit(RATE_LIMIT_AUTH_REGISTER);
+      return;
+    }
+
+    if (isPost && routeOptions.url === AUTH_LOGIN_PATH) {
+      setRateLimit(RATE_LIMIT_AUTH_LOGIN);
+      return;
+    }
+
+    if (isPost && routeOptions.url === AUTH_REFRESH_PATH) {
+      setRateLimit(RATE_LIMIT_AUTH_REFRESH);
+    }
+  });
+
+  app.useGlobalFilters(new GlobalHttpExceptionFilter());
+  app.setGlobalPrefix(API_PREFIX);
+  await app.init();
+  await app.getHttpAdapter().getInstance().ready();
+};
 
 describe('Plan enforcement', () => {
-  let app: INestApplication;
-  const prisma = new PrismaClient();
+  let app: NestFastifyApplication;
 
   beforeAll(async () => {
     const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = mod.createNestApplication();
-    await app.init();
+    app = mod.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+    await configureApp(app);
   });
 
   afterAll(async () => {
@@ -20,60 +145,71 @@ describe('Plan enforcement', () => {
   });
 
   it('Free plan: cannot create 2nd store', async () => {
-    // register
+    const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
     const reg = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
-      .send({ email: 'p@p.com', password: 'Password123!' })
+      .send({ email: `p+${suffix}@p.com`, password: 'Password123!' })
       .expect(201);
 
     const token = reg.body.accessToken;
 
-    // tenant
     const tenant = await request(app.getHttpServer())
       .post('/api/v1/tenants')
       .set('Authorization', `Bearer ${token}`)
-      .send({ name: 'T' })
+      .send({ name: `Tenant ${suffix}` })
       .expect(201);
 
     const tenantId = tenant.body.id;
 
-    // seed plans (ensure Free exists)
-    // If you already seed on boot, remove this.
     await prisma.plan.upsert({
       where: { code: 'free' },
-      update: {},
+      update: {
+        name: 'Free',
+        quotas: {
+          maxStores: 1,
+          maxProductsPerStore: 10,
+          maxProductsTotal: 10,
+          maxTagTier: 1,
+        },
+        features: {},
+      },
       create: {
         code: 'free',
         name: 'Free',
-        quotas: { maxStores: 1, maxProductsPerStore: 10, maxProductsTotal: 10, maxTagTier: 1 },
+        quotas: {
+          maxStores: 1,
+          maxProductsPerStore: 10,
+          maxProductsTotal: 10,
+          maxTagTier: 1,
+        },
         features: {},
       },
     });
 
-    // store 1 OK
     await request(app.getHttpServer())
       .post('/api/v1/stores')
       .set('Authorization', `Bearer ${token}`)
       .set('X-Tenant-Id', tenantId)
-      .send({ name: 'S1', slug: 's1' })
+      .send({ name: `S1 ${suffix}`, slug: `s1-${suffix}` })
       .expect(201);
 
-    // store 2 should fail
     const res = await request(app.getHttpServer())
       .post('/api/v1/stores')
       .set('Authorization', `Bearer ${token}`)
       .set('X-Tenant-Id', tenantId)
-      .send({ name: 'S2', slug: 's2' })
+      .send({ name: `S2 ${suffix}`, slug: `s2-${suffix}` })
       .expect(403);
 
     expect(res.body?.message || '').toContain('maxStores');
   });
 
   it('Free plan: cannot exceed maxProductsPerStore', async () => {
-    // register + tenant
+    const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
     const reg = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
-      .send({ email: 'q@q.com', password: 'Password123!' })
+      .send({ email: `q+${suffix}@q.com`, password: 'Password123!' })
       .expect(201);
 
     const token = reg.body.accessToken;
@@ -81,48 +217,69 @@ describe('Plan enforcement', () => {
     const tenant = await request(app.getHttpServer())
       .post('/api/v1/tenants')
       .set('Authorization', `Bearer ${token}`)
-      .send({ name: 'T2' })
+      .send({ name: `Tenant ${suffix}` })
       .expect(201);
 
     const tenantId = tenant.body.id;
 
     await prisma.plan.upsert({
       where: { code: 'free' },
-      update: {},
+      update: {
+        name: 'Free',
+        quotas: {
+          maxStores: 1,
+          maxProductsPerStore: 2,
+          maxProductsTotal: 10,
+          maxTagTier: 1,
+        },
+        features: {},
+      },
       create: {
         code: 'free',
         name: 'Free',
-        quotas: { maxStores: 1, maxProductsPerStore: 2, maxProductsTotal: 10, maxTagTier: 1 }, // set small for test
+        quotas: {
+          maxStores: 1,
+          maxProductsPerStore: 2,
+          maxProductsTotal: 10,
+          maxTagTier: 1,
+        },
         features: {},
       },
     });
 
-    // create store
     const store = await request(app.getHttpServer())
       .post('/api/v1/stores')
       .set('Authorization', `Bearer ${token}`)
       .set('X-Tenant-Id', tenantId)
-      .send({ name: 'S', slug: 'store' })
+      .send({ name: `Store ${suffix}`, slug: `store-${suffix}` })
       .expect(201);
 
     const storeId = store.body.id;
 
-    // create 2 products OK
-    for (let i = 1; i <= 2; i++) {
+    for (let i = 1; i <= 2; i += 1) {
       await request(app.getHttpServer())
         .post('/api/v1/products')
         .set('Authorization', `Bearer ${token}`)
         .set('X-Tenant-Id', tenantId)
-        .send({ storeId, title: `P${i}`, slug: `p${i}`, priceCents: 100 })
+        .send({
+          storeId,
+          title: `P${i} ${suffix}`,
+          slug: `p${i}-${suffix}`,
+          priceCents: 100,
+        })
         .expect(201);
     }
 
-    // 3rd should fail
     const res = await request(app.getHttpServer())
       .post('/api/v1/products')
       .set('Authorization', `Bearer ${token}`)
       .set('X-Tenant-Id', tenantId)
-      .send({ storeId, title: 'P3', slug: 'p3', priceCents: 100 })
+      .send({
+        storeId,
+        title: `P3 ${suffix}`,
+        slug: `p3-${suffix}`,
+        priceCents: 100,
+      })
       .expect(403);
 
     expect(res.body?.message || '').toContain('maxProductsPerStore');
