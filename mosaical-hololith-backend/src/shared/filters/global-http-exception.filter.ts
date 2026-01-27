@@ -61,7 +61,11 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       const messageBody: unknown = exception.getResponse();
       const safeErr =
         exception instanceof Error
-          ? { name: exception.name, message: exception.message, stack: exception.stack }
+          ? {
+              name: exception.name,
+              message: exception.message,
+              stack: exception.stack,
+            }
           : { name: 'UnknownError', message: String(exception) };
 
       if (status >= 500) {
