@@ -14,13 +14,28 @@ const logger = pino({
 export class RequestLoggerMiddleware implements NestMiddleware {
   use(req: any, res: any, next: () => void) {
     const start = Date.now();
-    req.id = req.id ?? randomUUID();
+    const headerRequestId = req.headers?.['x-request-id'];
+    const headerRequestIdValue =
+      typeof headerRequestId === 'string' && headerRequestId.trim().length > 0
+        ? headerRequestId
+        : undefined;
+
+    const requestId = req.id ?? headerRequestIdValue ?? randomUUID();
+    req.id = requestId;
+
+    if (typeof res.header === 'function') {
+      res.header('x-request-id', requestId);
+    } else if (typeof res.setHeader === 'function') {
+      res.setHeader('x-request-id', requestId);
+    } else if (res.raw && typeof res.raw.setHeader === 'function') {
+      res.raw.setHeader('x-request-id', requestId);
+    }
 
     res.on('finish', () => {
       const ms = Date.now() - start;
       logger.info(
         {
-          requestId: req.id,
+          requestId,
           method: req.method,
           path: req.originalUrl ?? req.url,
           statusCode: res.statusCode,
