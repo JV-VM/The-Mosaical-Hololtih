@@ -2,6 +2,8 @@ import { ForbiddenException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { CatalogController } from './catalog.controller';
 import { CatalogService } from './catalog.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantMemberGuard } from '../tenants/guards/tenant-member.guard';
 
 describe('CatalogController', () => {
   let controller: CatalogController;
@@ -18,6 +20,14 @@ describe('CatalogController', () => {
         {
           provide: CatalogService,
           useValue: catalog,
+        },
+        {
+          provide: JwtAuthGuard,
+          useValue: { canActivate: jest.fn(() => true) },
+        },
+        {
+          provide: TenantMemberGuard,
+          useValue: { canActivate: jest.fn(() => true) },
         },
       ],
     }).compile();
