@@ -20,6 +20,27 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
         ? headerRequestId
         : undefined);
 
+    const sendResponse = (statusCode: number, body: Record<string, unknown>) => {
+      const statusResult =
+        typeof response.status === 'function'
+          ? response.status(statusCode)
+          : response;
+
+      if (statusResult && typeof statusResult.json === 'function') {
+        statusResult.json(body);
+        return;
+      }
+
+      if (statusResult && typeof statusResult.send === 'function') {
+        statusResult.send(body);
+        return;
+      }
+
+      if (typeof response.send === 'function') {
+        response.send(body);
+      }
+    };
+
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const message = exception.getResponse();
@@ -36,7 +57,7 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
         );
       }
 
-      response.status(status).json({
+      sendResponse(status, {
         statusCode: status,
         timestamp: new Date().toISOString(),
         path: request?.url,
@@ -58,7 +79,7 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       'unhandled_exception',
     );
 
-    response.status(status).json({
+    sendResponse(status, {
       statusCode: status,
       timestamp: new Date().toISOString(),
       path: request?.url,
