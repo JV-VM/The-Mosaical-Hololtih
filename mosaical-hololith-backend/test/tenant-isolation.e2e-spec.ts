@@ -32,6 +32,24 @@ type RouteOptionsLike = {
   };
 };
 
+type RequestWithId = {
+  id?: string;
+  headers: Record<string, unknown>;
+};
+
+type ReplyWithHeader = {
+  header: (name: string, value: string) => void;
+};
+
+const getHeaderString = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    const firstUnknown: unknown = value[0];
+    return typeof firstUnknown === 'string' ? firstUnknown : undefined;
+  }
+  return undefined;
+};
+
 const RATE_LIMIT_DEFAULT: RateLimitOptions = {
   max: 200,
   timeWindow: '1 minute',
@@ -68,18 +86,21 @@ const configureApp = async (app: NestFastifyApplication) => {
 
   const fastify = app.getHttpAdapter().getInstance();
 
-  fastify.addHook('onRequest', (req: any, reply: any, done: () => void) => {
-    const headerRequestId = req.headers?.[REQUEST_ID_HEADER];
-    const headerRequestIdValue =
-      typeof headerRequestId === 'string' && headerRequestId.trim().length > 0
-        ? headerRequestId
-        : undefined;
+  fastify.addHook(
+    'onRequest',
+    (req: RequestWithId, reply: ReplyWithHeader, done: () => void) => {
+      const headerRequestId = getHeaderString(req.headers[REQUEST_ID_HEADER]);
+      const headerRequestIdValue =
+        typeof headerRequestId === 'string' && headerRequestId.trim().length > 0
+          ? headerRequestId
+          : undefined;
 
-    const requestId = req.id ?? headerRequestIdValue ?? randomUUID();
-    req.id = requestId;
-    reply.header(REQUEST_ID_HEADER, requestId);
-    done();
-  });
+      const requestId = req.id ?? headerRequestIdValue ?? randomUUID();
+      req.id = requestId;
+      reply.header(REQUEST_ID_HEADER, requestId);
+      done();
+    },
+  );
 
   fastify.addHook('onRoute', (routeOptions: RouteOptionsLike) => {
     const methods = Array.isArray(routeOptions.method)
@@ -122,8 +143,12 @@ describe('Tenant isolation (e2e)', () => {
   let app: NestFastifyApplication;
 
   beforeAll(async () => {
-    const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = mod.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+    const mod = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = mod.createNestApplication<NestFastifyApplication>(
+      new FastifyAdapter(),
+    );
     await configureApp(app);
   });
 
@@ -132,6 +157,10 @@ describe('Tenant isolation (e2e)', () => {
   });
 
   it('user A cannot access tenant B resources', async () => {
+    type RegisterResponse = { accessToken?: string };
+    type TenantResponse = { id?: string };
+    type ErrorResponse = { message?: string };
+
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
     const regARes = await app.inject({
@@ -148,8 +177,13 @@ describe('Tenant isolation (e2e)', () => {
     });
     expect(regBRes.statusCode).toBe(201);
 
-    const tokenA = regARes.json().accessToken as string;
-    const tokenB = regBRes.json().accessToken as string;
+    const regABodyUnknown: unknown = regARes.json();
+    const regABody = regABodyUnknown as RegisterResponse;
+    const tokenA = regABody.accessToken as string;
+
+    const regBBodyUnknown: unknown = regBRes.json();
+    const regBBody = regBBodyUnknown as RegisterResponse;
+    const tokenB = regBBody.accessToken as string;
 
     const tenantARes = await app.inject({
       method: 'POST',
@@ -167,8 +201,13 @@ describe('Tenant isolation (e2e)', () => {
     });
     expect(tenantBRes.statusCode).toBe(201);
 
-    const tenantAId = tenantARes.json().id as string;
-    const tenantBId = tenantBRes.json().id as string;
+    const tenantABodyUnknown: unknown = tenantARes.json();
+    const tenantABody = tenantABodyUnknown as TenantResponse;
+    const tenantAId = tenantABody.id as string;
+
+    const tenantBBodyUnknown: unknown = tenantBRes.json();
+    const tenantBBody = tenantBBodyUnknown as TenantResponse;
+    const tenantBId = tenantBBody.id as string;
 
     const storeBRes = await app.inject({
       method: 'POST',
@@ -191,7 +230,11 @@ describe('Tenant isolation (e2e)', () => {
     });
 
     expect(forbiddenRes.statusCode).toBe(403);
-    expect(forbiddenRes.json().message || '').toContain('Not a member of this tenant');
+    const forbiddenBodyUnknown: unknown = forbiddenRes.json();
+    const forbiddenBody = forbiddenBodyUnknown as ErrorResponse;
+    const forbiddenMessage =
+      typeof forbiddenBody.message === 'string' ? forbiddenBody.message : '';
+    expect(forbiddenMessage).toContain('Not a member of this tenant');
 
     const ownTenantRes = await app.inject({
       method: 'GET',

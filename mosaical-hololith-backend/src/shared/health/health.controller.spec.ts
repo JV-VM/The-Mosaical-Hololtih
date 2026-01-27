@@ -24,8 +24,8 @@ describe('HealthController', () => {
     controller = module.get<HealthController>(HealthController);
   });
 
-  it('live returns ok without hitting the database', async () => {
-    await expect(controller.live()).toEqual({ ok: true });
+  it('live returns ok without hitting the database', () => {
+    expect(controller.live()).toEqual({ ok: true });
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
 

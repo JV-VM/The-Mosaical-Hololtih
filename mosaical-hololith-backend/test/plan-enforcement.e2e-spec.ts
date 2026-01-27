@@ -34,6 +34,24 @@ type RouteOptionsLike = {
   };
 };
 
+type RequestWithId = {
+  id?: string;
+  headers: Record<string, unknown>;
+};
+
+type ReplyWithHeader = {
+  header: (name: string, value: string) => void;
+};
+
+const getHeaderString = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    const firstUnknown: unknown = value[0];
+    return typeof firstUnknown === 'string' ? firstUnknown : undefined;
+  }
+  return undefined;
+};
+
 const RATE_LIMIT_DEFAULT: RateLimitOptions = {
   max: 200,
   timeWindow: '1 minute',
@@ -79,18 +97,21 @@ const configureApp = async (app: NestFastifyApplication) => {
 
   const fastify = app.getHttpAdapter().getInstance();
 
-  fastify.addHook('onRequest', (req: any, reply: any, done: () => void) => {
-    const headerRequestId = req.headers?.[REQUEST_ID_HEADER];
-    const headerRequestIdValue =
-      typeof headerRequestId === 'string' && headerRequestId.trim().length > 0
-        ? headerRequestId
-        : undefined;
+  fastify.addHook(
+    'onRequest',
+    (req: RequestWithId, reply: ReplyWithHeader, done: () => void) => {
+      const headerRequestId = getHeaderString(req.headers[REQUEST_ID_HEADER]);
+      const headerRequestIdValue =
+        typeof headerRequestId === 'string' && headerRequestId.trim().length > 0
+          ? headerRequestId
+          : undefined;
 
-    const requestId = req.id ?? headerRequestIdValue ?? randomUUID();
-    req.id = requestId;
-    reply.header(REQUEST_ID_HEADER, requestId);
-    done();
-  });
+      const requestId = req.id ?? headerRequestIdValue ?? randomUUID();
+      req.id = requestId;
+      reply.header(REQUEST_ID_HEADER, requestId);
+      done();
+    },
+  );
 
   fastify.addHook('onRoute', (routeOptions: RouteOptionsLike) => {
     const methods = Array.isArray(routeOptions.method)
@@ -133,8 +154,12 @@ describe('Plan enforcement', () => {
   let app: NestFastifyApplication;
 
   beforeAll(async () => {
-    const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = mod.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+    const mod = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = mod.createNestApplication<NestFastifyApplication>(
+      new FastifyAdapter(),
+    );
     await configureApp(app);
   });
 
@@ -144,6 +169,10 @@ describe('Plan enforcement', () => {
   });
 
   it('Free plan: cannot create 2nd store', async () => {
+    type RegisterResponse = { accessToken?: string };
+    type TenantResponse = { id?: string };
+    type ErrorResponse = { message?: string };
+
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
     const regRes = await app.inject({
@@ -153,7 +182,9 @@ describe('Plan enforcement', () => {
     });
     expect(regRes.statusCode).toBe(201);
 
-    const token = regRes.json().accessToken as string;
+    const regBodyUnknown: unknown = regRes.json();
+    const regBody = regBodyUnknown as RegisterResponse;
+    const token = regBody.accessToken as string;
 
     const tenantRes = await app.inject({
       method: 'POST',
@@ -163,7 +194,9 @@ describe('Plan enforcement', () => {
     });
     expect(tenantRes.statusCode).toBe(201);
 
-    const tenantId = tenantRes.json().id as string;
+    const tenantBodyUnknown: unknown = tenantRes.json();
+    const tenantBody = tenantBodyUnknown as TenantResponse;
+    const tenantId = tenantBody.id as string;
 
     await prisma.plan.upsert({
       where: { code: 'free' },
@@ -212,10 +245,19 @@ describe('Plan enforcement', () => {
     });
 
     expect(store2Res.statusCode).toBe(403);
-    expect(store2Res.json()?.message || '').toContain('maxStores');
+    const store2BodyUnknown: unknown = store2Res.json();
+    const store2Body = store2BodyUnknown as ErrorResponse;
+    const store2Message =
+      typeof store2Body.message === 'string' ? store2Body.message : '';
+    expect(store2Message).toContain('maxStores');
   });
 
   it('Free plan: cannot exceed maxProductsPerStore', async () => {
+    type RegisterResponse = { accessToken?: string };
+    type TenantResponse = { id?: string };
+    type StoreResponse = { id?: string };
+    type ErrorResponse = { message?: string };
+
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
     const regRes = await app.inject({
@@ -225,7 +267,9 @@ describe('Plan enforcement', () => {
     });
     expect(regRes.statusCode).toBe(201);
 
-    const token = regRes.json().accessToken as string;
+    const regBodyUnknown: unknown = regRes.json();
+    const regBody = regBodyUnknown as RegisterResponse;
+    const token = regBody.accessToken as string;
 
     const tenantRes = await app.inject({
       method: 'POST',
@@ -235,7 +279,9 @@ describe('Plan enforcement', () => {
     });
     expect(tenantRes.statusCode).toBe(201);
 
-    const tenantId = tenantRes.json().id as string;
+    const tenantBodyUnknown: unknown = tenantRes.json();
+    const tenantBody = tenantBodyUnknown as TenantResponse;
+    const tenantId = tenantBody.id as string;
 
     await prisma.plan.upsert({
       where: { code: 'free' },
@@ -273,7 +319,9 @@ describe('Plan enforcement', () => {
     });
     expect(storeRes.statusCode).toBe(201);
 
-    const storeId = storeRes.json().id as string;
+    const storeBodyUnknown: unknown = storeRes.json();
+    const storeBody = storeBodyUnknown as StoreResponse;
+    const storeId = storeBody.id as string;
 
     for (let i = 1; i <= 2; i += 1) {
       const productRes = await app.inject({
@@ -309,6 +357,12 @@ describe('Plan enforcement', () => {
     });
 
     expect(thirdProductRes.statusCode).toBe(403);
-    expect(thirdProductRes.json()?.message || '').toContain('maxProductsPerStore');
+    const thirdProductBodyUnknown: unknown = thirdProductRes.json();
+    const thirdProductBody = thirdProductBodyUnknown as ErrorResponse;
+    const thirdProductMessage =
+      typeof thirdProductBody.message === 'string'
+        ? thirdProductBody.message
+        : '';
+    expect(thirdProductMessage).toContain('maxProductsPerStore');
   });
 });

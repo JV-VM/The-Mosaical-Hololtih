@@ -7,50 +7,65 @@ import {
 } from '@nestjs/common';
 import { logger } from '../middleware/request-logger.middleware';
 
+type RequestWithContext = {
+  id?: string;
+  headers: Record<string, unknown>;
+  url: string;
+  routeOptions?: { url?: string };
+};
+
+type ResponseLike = {
+  code?: (statusCode: number) => ResponseLike;
+  status?: (statusCode: number) => ResponseLike;
+  send: (body: Record<string, unknown>) => void;
+};
+
+const getHeaderString = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    const firstUnknown: unknown = value[0];
+    return typeof firstUnknown === 'string' ? firstUnknown : undefined;
+  }
+  return undefined;
+};
+
 @Catch()
 export class GlobalHttpExceptionFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
-    const response = ctx.getResponse();
-    const request = ctx.getRequest();
-    const headerRequestId = request?.headers?.['x-request-id'];
-    const requestId =
-      request?.id ??
-      (typeof headerRequestId === 'string' && headerRequestId.trim().length > 0
-        ? headerRequestId
-        : undefined);
+    const response = ctx.getResponse<ResponseLike>();
+    const request = ctx.getRequest<RequestWithContext>();
+    const headerRequestId = getHeaderString(request.headers['x-request-id']);
+    const requestId = request.id ?? headerRequestId;
+    const path = request.routeOptions?.url ?? request.url;
 
-    const sendResponse = (statusCode: number, body: Record<string, unknown>) => {
-      const statusResult =
-        typeof response.status === 'function'
-          ? response.status(statusCode)
-          : response;
-
-      if (statusResult && typeof statusResult.json === 'function') {
-        statusResult.json(body);
+    const sendResponse = (
+      statusCode: number,
+      body: Record<string, unknown>,
+    ) => {
+      if (typeof response.code === 'function') {
+        response.code(statusCode).send(body);
         return;
       }
 
-      if (statusResult && typeof statusResult.send === 'function') {
-        statusResult.send(body);
+      if (typeof response.status === 'function') {
+        response.status(statusCode).send(body);
         return;
       }
 
-      if (typeof response.send === 'function') {
-        response.send(body);
-      }
+      response.send(body);
     };
 
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
-      const message = exception.getResponse();
+      const messageBody: unknown = exception.getResponse();
 
-      if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      if (status >= 500) {
         logger.error(
           {
             requestId,
             statusCode: status,
-            path: request?.url,
+            path,
             err: exception,
           },
           'http_exception',
@@ -60,8 +75,10 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       sendResponse(status, {
         statusCode: status,
         timestamp: new Date().toISOString(),
-        path: request?.url,
-        ...(typeof message === 'object' ? message : { message }),
+        path,
+        ...(typeof messageBody === 'object' && messageBody !== null
+          ? (messageBody as Record<string, unknown>)
+          : { message: messageBody }),
         requestId,
       });
       return;
@@ -73,7 +90,7 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       {
         requestId,
         statusCode: status,
-        path: request?.url,
+        path,
         err: exception,
       },
       'unhandled_exception',
@@ -82,7 +99,7 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
     sendResponse(status, {
       statusCode: status,
       timestamp: new Date().toISOString(),
-      path: request?.url,
+      path,
       message: 'Internal server error',
       requestId,
     });

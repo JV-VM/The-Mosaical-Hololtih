@@ -7,4 +7,3 @@ declare module 'fastify' {
     membership?: { id: string; role: 'PRODUCER' | 'TENANT_ADMIN' };
   }
 }
-

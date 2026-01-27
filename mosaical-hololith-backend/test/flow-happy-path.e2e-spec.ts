@@ -32,6 +32,24 @@ type RouteOptionsLike = {
   };
 };
 
+type RequestWithId = {
+  id?: string;
+  headers: Record<string, unknown>;
+};
+
+type ReplyWithHeader = {
+  header: (name: string, value: string) => void;
+};
+
+const getHeaderString = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    const firstUnknown: unknown = value[0];
+    return typeof firstUnknown === 'string' ? firstUnknown : undefined;
+  }
+  return undefined;
+};
+
 const RATE_LIMIT_DEFAULT: RateLimitOptions = {
   max: 200,
   timeWindow: '1 minute',
@@ -68,18 +86,21 @@ const configureApp = async (app: NestFastifyApplication) => {
 
   const fastify = app.getHttpAdapter().getInstance();
 
-  fastify.addHook('onRequest', (req: any, reply: any, done: () => void) => {
-    const headerRequestId = req.headers?.[REQUEST_ID_HEADER];
-    const headerRequestIdValue =
-      typeof headerRequestId === 'string' && headerRequestId.trim().length > 0
-        ? headerRequestId
-        : undefined;
+  fastify.addHook(
+    'onRequest',
+    (req: RequestWithId, reply: ReplyWithHeader, done: () => void) => {
+      const headerRequestId = getHeaderString(req.headers[REQUEST_ID_HEADER]);
+      const headerRequestIdValue =
+        typeof headerRequestId === 'string' && headerRequestId.trim().length > 0
+          ? headerRequestId
+          : undefined;
 
-    const requestId = req.id ?? headerRequestIdValue ?? randomUUID();
-    req.id = requestId;
-    reply.header(REQUEST_ID_HEADER, requestId);
-    done();
-  });
+      const requestId = req.id ?? headerRequestIdValue ?? randomUUID();
+      req.id = requestId;
+      reply.header(REQUEST_ID_HEADER, requestId);
+      done();
+    },
+  );
 
   fastify.addHook('onRoute', (routeOptions: RouteOptionsLike) => {
     const methods = Array.isArray(routeOptions.method)
@@ -125,7 +146,9 @@ describe('Happy Path (register -> tenant -> store)', () => {
     const mod = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
-    app = mod.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+    app = mod.createNestApplication<NestFastifyApplication>(
+      new FastifyAdapter(),
+    );
     await configureApp(app);
   });
 
@@ -134,6 +157,10 @@ describe('Happy Path (register -> tenant -> store)', () => {
   });
 
   it('register -> create tenant -> create store', async () => {
+    type RegisterResponse = { accessToken?: string };
+    type TenantResponse = { id?: string };
+    type StoreResponse = { id?: string; tenantId?: string };
+
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
     const registerRes = await app.inject({
@@ -143,7 +170,8 @@ describe('Happy Path (register -> tenant -> store)', () => {
     });
 
     expect(registerRes.statusCode).toBe(201);
-    const registerBody = registerRes.json();
+    const registerBodyUnknown: unknown = registerRes.json();
+    const registerBody = registerBodyUnknown as RegisterResponse;
     expect(registerBody?.accessToken).toBeTruthy();
 
     const token = registerBody.accessToken as string;
@@ -156,7 +184,8 @@ describe('Happy Path (register -> tenant -> store)', () => {
     });
 
     expect(tenantRes.statusCode).toBe(201);
-    const tenantBody = tenantRes.json();
+    const tenantBodyUnknown: unknown = tenantRes.json();
+    const tenantBody = tenantBodyUnknown as TenantResponse;
     const tenantId = tenantBody.id as string;
     expect(tenantId).toBeTruthy();
 
@@ -171,7 +200,8 @@ describe('Happy Path (register -> tenant -> store)', () => {
     });
 
     expect(storeRes.statusCode).toBe(201);
-    const storeBody = storeRes.json();
+    const storeBodyUnknown: unknown = storeRes.json();
+    const storeBody = storeBodyUnknown as StoreResponse;
     expect(storeBody?.id).toBeTruthy();
     expect(storeBody?.tenantId).toBe(tenantId);
   });
