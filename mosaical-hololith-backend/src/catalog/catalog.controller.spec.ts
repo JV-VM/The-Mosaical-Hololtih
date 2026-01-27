@@ -4,6 +4,7 @@ import { CatalogController } from './catalog.controller';
 import { CatalogService } from './catalog.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantMemberGuard } from '../tenants/guards/tenant-member.guard';
+import { PrismaService } from '../shared/prisma/prisma.service';
 
 describe('CatalogController', () => {
   let controller: CatalogController;
@@ -28,6 +29,12 @@ describe('CatalogController', () => {
         {
           provide: TenantMemberGuard,
           useValue: { canActivate: jest.fn(() => true) },
+        },
+        {
+          provide: PrismaService,
+          useValue: {
+            membership: { findUnique: jest.fn() },
+          },
         },
       ],
     }).compile();
