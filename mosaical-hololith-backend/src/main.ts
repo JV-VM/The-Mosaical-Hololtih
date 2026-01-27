@@ -2,6 +2,7 @@ import 'dotenv/config'; // keep this at the top if you’re relying on process.e
 
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { randomUUID } from 'crypto';
 import {
   FastifyAdapter,
   NestFastifyApplication,
@@ -17,15 +18,40 @@ import { AppModule } from './app.module';
 import { env } from './shared/env';
 
 const API_PREFIX = 'api/v1';
+const REQUEST_ID_HEADER = 'x-request-id';
 const ANALYTICS_VIEW_PATH = `/${API_PREFIX}/analytics/view`;
-const RATE_LIMIT_DEFAULT = { max: 200, timeWindow: '1 minute' } as const;
-const RATE_LIMIT_ANALYTICS_VIEW = { max: 60, timeWindow: '1 minute' } as const;
+const AUTH_REGISTER_PATH = `/${API_PREFIX}/auth/register`;
+const AUTH_LOGIN_PATH = `/${API_PREFIX}/auth/login`;
+const AUTH_REFRESH_PATH = `/${API_PREFIX}/auth/refresh`;
+
+type RateLimitOptions = { max: number; timeWindow: string };
+
+const RATE_LIMIT_DEFAULT: RateLimitOptions = {
+  max: 200,
+  timeWindow: '1 minute',
+};
+const RATE_LIMIT_ANALYTICS_VIEW: RateLimitOptions = {
+  max: 60,
+  timeWindow: '1 minute',
+};
+const RATE_LIMIT_AUTH_REGISTER: RateLimitOptions = {
+  max: 5,
+  timeWindow: '1 minute',
+};
+const RATE_LIMIT_AUTH_LOGIN: RateLimitOptions = {
+  max: 10,
+  timeWindow: '1 minute',
+};
+const RATE_LIMIT_AUTH_REFRESH: RateLimitOptions = {
+  max: 30,
+  timeWindow: '1 minute',
+};
 
 type RouteOptionsLike = {
   url: string;
   method: string | string[];
   config?: Record<string, unknown> & {
-    rateLimit?: typeof RATE_LIMIT_ANALYTICS_VIEW;
+    rateLimit?: RateLimitOptions;
   };
 };
 
@@ -52,13 +78,48 @@ const setupRateLimit = async (app: NestFastifyApplication) => {
 
   const fastify = app.getHttpAdapter().getInstance();
 
+  // Ensure requestId is available and always returned, even on early rejections (e.g., 429)
+  fastify.addHook('onRequest', (req: any, reply: any, done: () => void) => {
+    const headerRequestId = req.headers?.[REQUEST_ID_HEADER];
+    const headerRequestIdValue =
+      typeof headerRequestId === 'string' && headerRequestId.trim().length > 0
+        ? headerRequestId
+        : undefined;
+
+    const requestId = req.id ?? headerRequestIdValue ?? randomUUID();
+    req.id = requestId;
+    reply.header(REQUEST_ID_HEADER, requestId);
+    done();
+  });
+
   fastify.addHook('onRoute', (routeOptions: RouteOptionsLike) => {
-    if (
-      routeOptions.url === ANALYTICS_VIEW_PATH &&
-      routeOptions.method === 'POST'
-    ) {
+    const methods = Array.isArray(routeOptions.method)
+      ? routeOptions.method
+      : [routeOptions.method];
+    const isPost = methods.includes('POST');
+
+    const setRateLimit = (options: RateLimitOptions) => {
       routeOptions.config = routeOptions.config ?? {};
-      routeOptions.config.rateLimit = RATE_LIMIT_ANALYTICS_VIEW;
+      routeOptions.config.rateLimit = options;
+    };
+
+    if (isPost && routeOptions.url === ANALYTICS_VIEW_PATH) {
+      setRateLimit(RATE_LIMIT_ANALYTICS_VIEW);
+      return;
+    }
+
+    if (isPost && routeOptions.url === AUTH_REGISTER_PATH) {
+      setRateLimit(RATE_LIMIT_AUTH_REGISTER);
+      return;
+    }
+
+    if (isPost && routeOptions.url === AUTH_LOGIN_PATH) {
+      setRateLimit(RATE_LIMIT_AUTH_LOGIN);
+      return;
+    }
+
+    if (isPost && routeOptions.url === AUTH_REFRESH_PATH) {
+      setRateLimit(RATE_LIMIT_AUTH_REFRESH);
     }
   });
 };
