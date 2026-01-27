@@ -10,7 +10,6 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { randomUUID } from 'crypto';
-import request from 'supertest';
 
 import { AppModule } from '../src/app.module';
 import { env } from '../src/shared/env';
@@ -137,32 +136,43 @@ describe('Happy Path (register -> tenant -> store)', () => {
   it('register -> create tenant -> create store', async () => {
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    const register = await request(app.getHttpServer())
-      .post('/api/v1/auth/register')
-      .send({ email: `a+${suffix}@a.com`, password: 'Password123!' })
-      .expect(201);
+    const registerRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: { email: `a+${suffix}@a.com`, password: 'Password123!' },
+    });
 
-    expect(register.body?.accessToken).toBeTruthy();
+    expect(registerRes.statusCode).toBe(201);
+    const registerBody = registerRes.json();
+    expect(registerBody?.accessToken).toBeTruthy();
 
-    const token = register.body.accessToken;
+    const token = registerBody.accessToken as string;
 
-    const tenantRes = await request(app.getHttpServer())
-      .post('/api/v1/tenants')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ name: `Tenant ${suffix}` })
-      .expect(201);
+    const tenantRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/tenants',
+      payload: { name: `Tenant ${suffix}` },
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
-    const tenantId = tenantRes.body.id;
+    expect(tenantRes.statusCode).toBe(201);
+    const tenantBody = tenantRes.json();
+    const tenantId = tenantBody.id as string;
     expect(tenantId).toBeTruthy();
 
-    const storeRes = await request(app.getHttpServer())
-      .post('/api/v1/stores')
-      .set('Authorization', `Bearer ${token}`)
-      .set('X-Tenant-Id', tenantId)
-      .send({ name: `Store ${suffix}`, slug: `store-${suffix}` })
-      .expect(201);
+    const storeRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/stores',
+      payload: { name: `Store ${suffix}`, slug: `store-${suffix}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Tenant-Id': tenantId,
+      },
+    });
 
-    expect(storeRes.body?.id).toBeTruthy();
-    expect(storeRes.body?.tenantId).toBe(tenantId);
+    expect(storeRes.statusCode).toBe(201);
+    const storeBody = storeRes.json();
+    expect(storeBody?.id).toBeTruthy();
+    expect(storeBody?.tenantId).toBe(tenantId);
   });
 });

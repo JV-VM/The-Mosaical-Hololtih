@@ -10,7 +10,6 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { randomUUID } from 'crypto';
-import request from 'supertest';
 
 import { AppModule } from '../src/app.module';
 import { env } from '../src/shared/env';
@@ -135,54 +134,74 @@ describe('Tenant isolation (e2e)', () => {
   it('user A cannot access tenant B resources', async () => {
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    const regA = await request(app.getHttpServer())
-      .post('/api/v1/auth/register')
-      .send({ email: `a+${suffix}@tenants.com`, password: 'Password123!' })
-      .expect(201);
+    const regARes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: { email: `a+${suffix}@tenants.com`, password: 'Password123!' },
+    });
+    expect(regARes.statusCode).toBe(201);
 
-    const regB = await request(app.getHttpServer())
-      .post('/api/v1/auth/register')
-      .send({ email: `b+${suffix}@tenants.com`, password: 'Password123!' })
-      .expect(201);
+    const regBRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: { email: `b+${suffix}@tenants.com`, password: 'Password123!' },
+    });
+    expect(regBRes.statusCode).toBe(201);
 
-    const tokenA = regA.body.accessToken;
-    const tokenB = regB.body.accessToken;
+    const tokenA = regARes.json().accessToken as string;
+    const tokenB = regBRes.json().accessToken as string;
 
-    const tenantA = await request(app.getHttpServer())
-      .post('/api/v1/tenants')
-      .set('Authorization', `Bearer ${tokenA}`)
-      .send({ name: `Tenant A ${suffix}` })
-      .expect(201);
+    const tenantARes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/tenants',
+      payload: { name: `Tenant A ${suffix}` },
+      headers: { Authorization: `Bearer ${tokenA}` },
+    });
+    expect(tenantARes.statusCode).toBe(201);
 
-    const tenantB = await request(app.getHttpServer())
-      .post('/api/v1/tenants')
-      .set('Authorization', `Bearer ${tokenB}`)
-      .send({ name: `Tenant B ${suffix}` })
-      .expect(201);
+    const tenantBRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/tenants',
+      payload: { name: `Tenant B ${suffix}` },
+      headers: { Authorization: `Bearer ${tokenB}` },
+    });
+    expect(tenantBRes.statusCode).toBe(201);
 
-    const tenantAId = tenantA.body.id;
-    const tenantBId = tenantB.body.id;
+    const tenantAId = tenantARes.json().id as string;
+    const tenantBId = tenantBRes.json().id as string;
 
-    await request(app.getHttpServer())
-      .post('/api/v1/stores')
-      .set('Authorization', `Bearer ${tokenB}`)
-      .set('X-Tenant-Id', tenantBId)
-      .send({ name: `Store B ${suffix}`, slug: `store-b-${suffix}` })
-      .expect(201);
+    const storeBRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/stores',
+      payload: { name: `Store B ${suffix}`, slug: `store-b-${suffix}` },
+      headers: {
+        Authorization: `Bearer ${tokenB}`,
+        'X-Tenant-Id': tenantBId,
+      },
+    });
+    expect(storeBRes.statusCode).toBe(201);
 
-    const forbidden = await request(app.getHttpServer())
-      .get('/api/v1/stores')
-      .set('Authorization', `Bearer ${tokenA}`)
-      .set('X-Tenant-Id', tenantBId)
-      .expect(403);
+    const forbiddenRes = await app.inject({
+      method: 'GET',
+      url: '/api/v1/stores',
+      headers: {
+        Authorization: `Bearer ${tokenA}`,
+        'X-Tenant-Id': tenantBId,
+      },
+    });
 
-    expect(forbidden.body?.message || '').toContain('Not a member of this tenant');
+    expect(forbiddenRes.statusCode).toBe(403);
+    expect(forbiddenRes.json().message || '').toContain('Not a member of this tenant');
 
-    // Sanity check: A can access its own tenant context
-    await request(app.getHttpServer())
-      .get('/api/v1/stores')
-      .set('Authorization', `Bearer ${tokenA}`)
-      .set('X-Tenant-Id', tenantAId)
-      .expect(200);
+    const ownTenantRes = await app.inject({
+      method: 'GET',
+      url: '/api/v1/stores',
+      headers: {
+        Authorization: `Bearer ${tokenA}`,
+        'X-Tenant-Id': tenantAId,
+      },
+    });
+
+    expect(ownTenantRes.statusCode).toBe(200);
   });
 });

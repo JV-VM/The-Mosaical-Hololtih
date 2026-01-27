@@ -10,7 +10,6 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { randomUUID } from 'crypto';
-import request from 'supertest';
 
 import { AppModule } from '../src/app.module';
 import { env } from '../src/shared/env';
@@ -137,70 +136,94 @@ describe('Public discovery isolation', () => {
   it('explore should not return unpublished stores/products', async () => {
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    const reg = await request(app.getHttpServer())
-      .post('/api/v1/auth/register')
-      .send({ email: `iso+${suffix}@a.com`, password: 'Password123!' })
-      .expect(201);
+    const regRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: { email: `iso+${suffix}@a.com`, password: 'Password123!' },
+    });
+    expect(regRes.statusCode).toBe(201);
 
-    const token = reg.body.accessToken;
+    const token = regRes.json().accessToken as string;
 
-    const tenant = await request(app.getHttpServer())
-      .post('/api/v1/tenants')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ name: `Tenant ${suffix}` })
-      .expect(201);
+    const tenantRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/tenants',
+      payload: { name: `Tenant ${suffix}` },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(tenantRes.statusCode).toBe(201);
 
-    const tenantId = tenant.body.id;
+    const tenantId = tenantRes.json().id as string;
 
-    const store = await request(app.getHttpServer())
-      .post('/api/v1/stores')
-      .set('Authorization', `Bearer ${token}`)
-      .set('X-Tenant-Id', tenantId)
-      .send({ name: `Store ${suffix}`, slug: `store-${suffix}` })
-      .expect(201);
+    const storeRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/stores',
+      payload: { name: `Store ${suffix}`, slug: `store-${suffix}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Tenant-Id': tenantId,
+      },
+    });
+    expect(storeRes.statusCode).toBe(201);
 
-    const storeId = store.body.id;
+    const storeId = storeRes.json().id as string;
 
-    const product = await request(app.getHttpServer())
-      .post('/api/v1/products')
-      .set('Authorization', `Bearer ${token}`)
-      .set('X-Tenant-Id', tenantId)
-      .send({
+    const productRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/products',
+      payload: {
         storeId,
         title: `Product ${suffix}`,
         slug: `product-${suffix}`,
         priceCents: 100,
-      })
-      .expect(201);
+      },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Tenant-Id': tenantId,
+      },
+    });
+    expect(productRes.statusCode).toBe(201);
 
-    const productId = product.body.id;
+    const productId = productRes.json().id as string;
 
-    // Explore should not show draft content
-    const exploreDraft = await request(app.getHttpServer())
-      .get('/api/v1/explore')
-      .expect(200);
+    const exploreDraftRes = await app.inject({
+      method: 'GET',
+      url: '/api/v1/explore',
+    });
+    expect(exploreDraftRes.statusCode).toBe(200);
 
-    expect(JSON.stringify(exploreDraft.body)).not.toContain(storeId);
-    expect(JSON.stringify(exploreDraft.body)).not.toContain(productId);
+    const exploreDraftBody = JSON.stringify(exploreDraftRes.json());
+    expect(exploreDraftBody).not.toContain(storeId);
+    expect(exploreDraftBody).not.toContain(productId);
 
-    // Publish and verify it appears
-    await request(app.getHttpServer())
-      .post(`/api/v1/stores/${storeId}/publish`)
-      .set('Authorization', `Bearer ${token}`)
-      .set('X-Tenant-Id', tenantId)
-      .expect(201);
+    const publishStoreRes = await app.inject({
+      method: 'POST',
+      url: `/api/v1/stores/${storeId}/publish`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Tenant-Id': tenantId,
+      },
+    });
+    expect(publishStoreRes.statusCode).toBe(201);
 
-    await request(app.getHttpServer())
-      .post(`/api/v1/products/${productId}/publish`)
-      .set('Authorization', `Bearer ${token}`)
-      .set('X-Tenant-Id', tenantId)
-      .expect(201);
+    const publishProductRes = await app.inject({
+      method: 'POST',
+      url: `/api/v1/products/${productId}/publish`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Tenant-Id': tenantId,
+      },
+    });
+    expect(publishProductRes.statusCode).toBe(201);
 
-    const explorePublished = await request(app.getHttpServer())
-      .get('/api/v1/explore')
-      .expect(200);
+    const explorePublishedRes = await app.inject({
+      method: 'GET',
+      url: '/api/v1/explore',
+    });
+    expect(explorePublishedRes.statusCode).toBe(200);
 
-    expect(JSON.stringify(explorePublished.body)).toContain(storeId);
-    expect(JSON.stringify(explorePublished.body)).toContain(productId);
+    const explorePublishedBody = JSON.stringify(explorePublishedRes.json());
+    expect(explorePublishedBody).toContain(storeId);
+    expect(explorePublishedBody).toContain(productId);
   });
 });

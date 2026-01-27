@@ -12,7 +12,6 @@ import rateLimit from '@fastify/rate-limit';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
-import request from 'supertest';
 
 import { AppModule } from '../src/app.module';
 import { env } from '../src/shared/env';
@@ -147,77 +146,94 @@ describe('Analytics deduplication', () => {
   it('dedupes same viewer on the same day, but counts different viewers and different days', async () => {
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    const reg = await request(app.getHttpServer())
-      .post('/api/v1/auth/register')
-      .send({ email: `ana+${suffix}@a.com`, password: 'Password123!' })
-      .expect(201);
+    const regRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: { email: `ana+${suffix}@a.com`, password: 'Password123!' },
+    });
+    expect(regRes.statusCode).toBe(201);
 
-    const token = reg.body.accessToken;
+    const token = regRes.json().accessToken as string;
 
-    const tenant = await request(app.getHttpServer())
-      .post('/api/v1/tenants')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ name: `Tenant ${suffix}` })
-      .expect(201);
+    const tenantRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/tenants',
+      payload: { name: `Tenant ${suffix}` },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(tenantRes.statusCode).toBe(201);
 
-    const tenantId = tenant.body.id;
+    const tenantId = tenantRes.json().id as string;
 
-    const store = await request(app.getHttpServer())
-      .post('/api/v1/stores')
-      .set('Authorization', `Bearer ${token}`)
-      .set('X-Tenant-Id', tenantId)
-      .send({ name: `Store ${suffix}`, slug: `store-${suffix}` })
-      .expect(201);
+    const storeRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/stores',
+      payload: { name: `Store ${suffix}`, slug: `store-${suffix}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Tenant-Id': tenantId,
+      },
+    });
+    expect(storeRes.statusCode).toBe(201);
 
-    const storeId = store.body.id;
+    const storeId = storeRes.json().id as string;
 
-    await request(app.getHttpServer())
-      .post(`/api/v1/stores/${storeId}/publish`)
-      .set('Authorization', `Bearer ${token}`)
-      .set('X-Tenant-Id', tenantId)
-      .expect(201);
+    const publishRes = await app.inject({
+      method: 'POST',
+      url: `/api/v1/stores/${storeId}/publish`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Tenant-Id': tenantId,
+      },
+    });
+    expect(publishRes.statusCode).toBe(201);
 
     const viewerA = `viewer-a-${suffix}`;
     const viewerB = `viewer-b-${suffix}`;
 
-    // Same viewer, same day -> 1 event
-    await request(app.getHttpServer())
-      .post('/api/v1/analytics/view')
-      .send({ type: 'STORE_VIEW', storeId, viewerId: viewerA })
-      .expect(201);
+    const trackA1 = await app.inject({
+      method: 'POST',
+      url: '/api/v1/analytics/view',
+      payload: { type: 'STORE_VIEW', storeId, viewerId: viewerA },
+    });
+    expect(trackA1.statusCode).toBe(201);
 
-    await request(app.getHttpServer())
-      .post('/api/v1/analytics/view')
-      .send({ type: 'STORE_VIEW', storeId, viewerId: viewerA })
-      .expect(201);
+    const trackA2 = await app.inject({
+      method: 'POST',
+      url: '/api/v1/analytics/view',
+      payload: { type: 'STORE_VIEW', storeId, viewerId: viewerA },
+    });
+    expect(trackA2.statusCode).toBe(201);
 
     let count = await prisma.analyticsEvent.count({
       where: { storeId, type: 'STORE_VIEW' },
     });
     expect(count).toBe(1);
 
-    // Different viewer, same day -> increments
-    await request(app.getHttpServer())
-      .post('/api/v1/analytics/view')
-      .send({ type: 'STORE_VIEW', storeId, viewerId: viewerB })
-      .expect(201);
+    const trackB = await app.inject({
+      method: 'POST',
+      url: '/api/v1/analytics/view',
+      payload: { type: 'STORE_VIEW', storeId, viewerId: viewerB },
+    });
+    expect(trackB.statusCode).toBe(201);
 
     count = await prisma.analyticsEvent.count({
       where: { storeId, type: 'STORE_VIEW' },
     });
     expect(count).toBe(2);
 
-    // Simulate previous day for existing events, then same viewer should count again today
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
     await prisma.analyticsEvent.updateMany({
       where: { storeId, type: 'STORE_VIEW' },
       data: { createdAt: yesterday },
     });
 
-    await request(app.getHttpServer())
-      .post('/api/v1/analytics/view')
-      .send({ type: 'STORE_VIEW', storeId, viewerId: viewerA })
-      .expect(201);
+    const trackNextDay = await app.inject({
+      method: 'POST',
+      url: '/api/v1/analytics/view',
+      payload: { type: 'STORE_VIEW', storeId, viewerId: viewerA },
+    });
+    expect(trackNextDay.statusCode).toBe(201);
 
     count = await prisma.analyticsEvent.count({
       where: { storeId, type: 'STORE_VIEW' },

@@ -12,7 +12,6 @@ import rateLimit from '@fastify/rate-limit';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
-import request from 'supertest';
 
 import { AppModule } from '../src/app.module';
 import { env } from '../src/shared/env';
@@ -147,20 +146,24 @@ describe('Plan enforcement', () => {
   it('Free plan: cannot create 2nd store', async () => {
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    const reg = await request(app.getHttpServer())
-      .post('/api/v1/auth/register')
-      .send({ email: `p+${suffix}@p.com`, password: 'Password123!' })
-      .expect(201);
+    const regRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: { email: `p+${suffix}@p.com`, password: 'Password123!' },
+    });
+    expect(regRes.statusCode).toBe(201);
 
-    const token = reg.body.accessToken;
+    const token = regRes.json().accessToken as string;
 
-    const tenant = await request(app.getHttpServer())
-      .post('/api/v1/tenants')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ name: `Tenant ${suffix}` })
-      .expect(201);
+    const tenantRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/tenants',
+      payload: { name: `Tenant ${suffix}` },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(tenantRes.statusCode).toBe(201);
 
-    const tenantId = tenant.body.id;
+    const tenantId = tenantRes.json().id as string;
 
     await prisma.plan.upsert({
       where: { code: 'free' },
@@ -187,40 +190,52 @@ describe('Plan enforcement', () => {
       },
     });
 
-    await request(app.getHttpServer())
-      .post('/api/v1/stores')
-      .set('Authorization', `Bearer ${token}`)
-      .set('X-Tenant-Id', tenantId)
-      .send({ name: `S1 ${suffix}`, slug: `s1-${suffix}` })
-      .expect(201);
+    const store1Res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/stores',
+      payload: { name: `S1 ${suffix}`, slug: `s1-${suffix}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Tenant-Id': tenantId,
+      },
+    });
+    expect(store1Res.statusCode).toBe(201);
 
-    const res = await request(app.getHttpServer())
-      .post('/api/v1/stores')
-      .set('Authorization', `Bearer ${token}`)
-      .set('X-Tenant-Id', tenantId)
-      .send({ name: `S2 ${suffix}`, slug: `s2-${suffix}` })
-      .expect(403);
+    const store2Res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/stores',
+      payload: { name: `S2 ${suffix}`, slug: `s2-${suffix}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Tenant-Id': tenantId,
+      },
+    });
 
-    expect(res.body?.message || '').toContain('maxStores');
+    expect(store2Res.statusCode).toBe(403);
+    expect(store2Res.json()?.message || '').toContain('maxStores');
   });
 
   it('Free plan: cannot exceed maxProductsPerStore', async () => {
     const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    const reg = await request(app.getHttpServer())
-      .post('/api/v1/auth/register')
-      .send({ email: `q+${suffix}@q.com`, password: 'Password123!' })
-      .expect(201);
+    const regRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: { email: `q+${suffix}@q.com`, password: 'Password123!' },
+    });
+    expect(regRes.statusCode).toBe(201);
 
-    const token = reg.body.accessToken;
+    const token = regRes.json().accessToken as string;
 
-    const tenant = await request(app.getHttpServer())
-      .post('/api/v1/tenants')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ name: `Tenant ${suffix}` })
-      .expect(201);
+    const tenantRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/tenants',
+      payload: { name: `Tenant ${suffix}` },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(tenantRes.statusCode).toBe(201);
 
-    const tenantId = tenant.body.id;
+    const tenantId = tenantRes.json().id as string;
 
     await prisma.plan.upsert({
       where: { code: 'free' },
@@ -247,41 +262,53 @@ describe('Plan enforcement', () => {
       },
     });
 
-    const store = await request(app.getHttpServer())
-      .post('/api/v1/stores')
-      .set('Authorization', `Bearer ${token}`)
-      .set('X-Tenant-Id', tenantId)
-      .send({ name: `Store ${suffix}`, slug: `store-${suffix}` })
-      .expect(201);
+    const storeRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/stores',
+      payload: { name: `Store ${suffix}`, slug: `store-${suffix}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Tenant-Id': tenantId,
+      },
+    });
+    expect(storeRes.statusCode).toBe(201);
 
-    const storeId = store.body.id;
+    const storeId = storeRes.json().id as string;
 
     for (let i = 1; i <= 2; i += 1) {
-      await request(app.getHttpServer())
-        .post('/api/v1/products')
-        .set('Authorization', `Bearer ${token}`)
-        .set('X-Tenant-Id', tenantId)
-        .send({
+      const productRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/products',
+        payload: {
           storeId,
           title: `P${i} ${suffix}`,
           slug: `p${i}-${suffix}`,
           priceCents: 100,
-        })
-        .expect(201);
+        },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-Tenant-Id': tenantId,
+        },
+      });
+      expect(productRes.statusCode).toBe(201);
     }
 
-    const res = await request(app.getHttpServer())
-      .post('/api/v1/products')
-      .set('Authorization', `Bearer ${token}`)
-      .set('X-Tenant-Id', tenantId)
-      .send({
+    const thirdProductRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/products',
+      payload: {
         storeId,
         title: `P3 ${suffix}`,
         slug: `p3-${suffix}`,
         priceCents: 100,
-      })
-      .expect(403);
+      },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Tenant-Id': tenantId,
+      },
+    });
 
-    expect(res.body?.message || '').toContain('maxProductsPerStore');
+    expect(thirdProductRes.statusCode).toBe(403);
+    expect(thirdProductRes.json()?.message || '').toContain('maxProductsPerStore');
   });
 });

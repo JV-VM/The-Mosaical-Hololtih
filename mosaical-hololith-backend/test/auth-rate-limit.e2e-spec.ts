@@ -10,7 +10,6 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { randomUUID } from 'crypto';
-import request from 'supertest';
 
 import { AppModule } from '../src/app.module';
 import { env } from '../src/shared/env';
@@ -22,6 +21,14 @@ const AUTH_LOGIN_PATH = `/${API_PREFIX}/auth/login`;
 
 type RateLimitOptions = { max: number; timeWindow: string };
 
+type RouteOptionsLike = {
+  url: string;
+  method: string | string[];
+  config?: Record<string, unknown> & {
+    rateLimit?: RateLimitOptions;
+  };
+};
+
 const RATE_LIMIT_DEFAULT: RateLimitOptions = {
   max: 200,
   timeWindow: '1 minute',
@@ -29,14 +36,6 @@ const RATE_LIMIT_DEFAULT: RateLimitOptions = {
 const RATE_LIMIT_AUTH_LOGIN: RateLimitOptions = {
   max: 10,
   timeWindow: '1 minute',
-};
-
-type RouteOptionsLike = {
-  url: string;
-  method: string | string[];
-  config?: Record<string, unknown> & {
-    rateLimit?: RateLimitOptions;
-  };
 };
 
 describe('Auth rate limit (e2e)', () => {
@@ -104,22 +103,23 @@ describe('Auth rate limit (e2e)', () => {
   });
 
   it('returns 429 after a burst of login attempts and still includes x-request-id', async () => {
-    const server = app.getHttpServer();
-
     const attempts = Array.from({ length: 15 }, () =>
-      request(server).post('/api/v1/auth/login').send({
-        email: 'nobody@example.com',
-        password: 'wrong-password',
+      app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: {
+          email: 'nobody@example.com',
+          password: 'wrong-password',
+        },
       }),
     );
 
     const responses = await Promise.all(attempts);
-    const statusCodes = responses.map((r) => r.status);
-    const tooManyRequests = responses.filter((r) => r.status === 429);
+    const statusCodes = responses.map((r) => r.statusCode);
+    const tooManyRequests = responses.filter((r) => r.statusCode === 429);
 
     expect(statusCodes).toContain(429);
     expect(tooManyRequests.length).toBeGreaterThan(0);
     expect(tooManyRequests[0].headers[REQUEST_ID_HEADER]).toBeTruthy();
   });
 });
-

@@ -10,7 +10,6 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { randomUUID } from 'crypto';
-import request from 'supertest';
 
 import { AppModule } from '../src/app.module';
 import { env } from '../src/shared/env';
@@ -136,11 +135,13 @@ describe('App health (e2e)', () => {
   });
 
   it('GET /api/v1/health/live returns ok and x-request-id', async () => {
-    const res = await request(app.getHttpServer())
-      .get('/api/v1/health/live')
-      .expect(200);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/health/live',
+    });
 
-    expect(res.body).toEqual({ ok: true });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
     expect(res.headers[REQUEST_ID_HEADER]).toBeTruthy();
   });
 });
