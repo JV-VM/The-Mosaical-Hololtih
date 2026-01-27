@@ -71,3 +71,13 @@ Every response should include the `x-request-id` header.
 
 - Ensure your proxy/load balancer preserves or forwards `x-request-id`.
 - The app will generate one if it is missing.
+
+## 7) CI/CD expectations
+
+This repo includes a GitHub Actions workflow at `.github/workflows/ci.yml` that:
+
+- Boots a Postgres service
+- Runs `prisma migrate deploy`
+- Executes `npm run lint`, `npm test`, and `npm run test:e2e`
+
+To reproduce locally, start a Postgres instance and set `DATABASE_URL` / `MIGRATE_URL` before running the same commands.
