@@ -20,7 +20,11 @@
     "test:e2e": "jest --config ./test/jest-e2e.json --rootDir . --setupFiles dotenv/config --setupFilesAfterEnv ./test/setup-e2e.ts",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:migrate:status": "prisma migrate status",
-    "db:migrate:reset": "prisma migrate reset"
+    "db:migrate:reset": "prisma migrate reset",
+    "db:seed": "prisma db seed"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
