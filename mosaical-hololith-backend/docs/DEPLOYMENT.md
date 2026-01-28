@@ -37,14 +37,23 @@ Notes:
 - `db:migrate:deploy` is the safe, production-oriented command.
 - `db:migrate:reset` is destructive and intended for development only.
 
-## 4) Build and start
+## 4) Database seed
+
+After migrations, seed the minimal lookup data (plans + tags). The seed is idempotent and safe to re-run.
+
+```bash
+pnpm run db:migrate:deploy
+pnpm run db:seed
+```
+
+## 5) Build and start
 
 ```bash
 npm run build
 npm run start:prod
 ```
 
-## 5) Smoke checks
+## 6) Smoke checks
 
 With the global prefix enabled, check:
 
@@ -55,7 +64,7 @@ With the global prefix enabled, check:
 
 Every response should include the `x-request-id` header.
 
-## 6) Troubleshooting
+## 7) Troubleshooting
 
 ### Migrations fail with missing env var
 
@@ -72,7 +81,7 @@ Every response should include the `x-request-id` header.
 - Ensure your proxy/load balancer preserves or forwards `x-request-id`.
 - The app will generate one if it is missing.
 
-## 7) CI/CD expectations
+## 8) CI/CD expectations
 
 This repo includes a GitHub Actions workflow at `.github/workflows/ci.yml` that:
 
