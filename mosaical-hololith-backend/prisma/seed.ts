@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -6,7 +7,7 @@ if (!databaseUrl) {
 }
 
 const prisma = new PrismaClient({
-  datasourceUrl: databaseUrl,
+  adapter: new PrismaPg({ connectionString: databaseUrl }),
 });
 
 type PlanSeed = {
