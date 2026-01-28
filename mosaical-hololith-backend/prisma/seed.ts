@@ -1,6 +1,17 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient();
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error('DATABASE_URL is required to run the seed script.');
+}
+
+const prisma = new PrismaClient({
+  datasources: {
+    db: {
+      url: databaseUrl,
+    },
+  },
+});
 
 type PlanSeed = {
   code: string;
