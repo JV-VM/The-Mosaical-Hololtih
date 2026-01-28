@@ -6,11 +6,7 @@ if (!databaseUrl) {
 }
 
 const prisma = new PrismaClient({
-  datasources: {
-    db: {
-      url: databaseUrl,
-    },
-  },
+  datasourceUrl: databaseUrl,
 });
 
 type PlanSeed = {
