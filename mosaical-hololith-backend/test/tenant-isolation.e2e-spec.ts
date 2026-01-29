@@ -212,7 +212,11 @@ describe('Tenant isolation (e2e)', () => {
     const storeBRes = await app.inject({
       method: 'POST',
       url: '/api/v1/stores',
-      payload: { name: `Store B ${suffix}`, slug: `store-b-${suffix}` },
+      payload: {
+        name: `Store B ${suffix}`,
+        slug: `store-b-${suffix}`,
+        subdomain: `store-b-${suffix}`,
+      },
       headers: {
         Authorization: `Bearer ${tokenB}`,
         'X-Tenant-Id': tenantBId,

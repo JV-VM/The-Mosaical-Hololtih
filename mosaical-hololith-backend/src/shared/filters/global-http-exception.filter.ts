@@ -59,6 +59,10 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const messageBody: unknown = exception.getResponse();
+      const safeErr =
+        exception instanceof Error
+          ? { name: exception.name, message: exception.message, stack: exception.stack }
+          : { name: 'UnknownError', message: String(exception) };
 
       if (status >= 500) {
         logger.error(
@@ -66,7 +70,7 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
             requestId,
             statusCode: status,
             path,
-            err: exception,
+            err: safeErr,
           },
           'http_exception',
         );
@@ -84,25 +88,45 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       return;
     }
 
+    const exceptionStatus =
+      typeof (exception as { statusCode?: unknown })?.statusCode === 'number'
+        ? (exception as { statusCode: number }).statusCode
+        : typeof (exception as { status?: unknown })?.status === 'number'
+          ? (exception as { status: number }).status
+          : undefined;
+    if (exceptionStatus && exceptionStatus >= 400) {
+      const message =
+        exception instanceof Error ? exception.message : 'Request failed';
+      sendResponse(exceptionStatus, {
+        statusCode: exceptionStatus,
+        timestamp: new Date().toISOString(),
+        path,
+        message,
+        requestId,
+      });
+      return;
+    }
+
     // Non-HTTP exceptions: never leak internal error details to clients.
     const status = HttpStatus.INTERNAL_SERVER_ERROR;
-    const isTestEnv = process.env.NODE_ENV === 'test';
-    const isProdEnv = process.env.NODE_ENV === 'production';
-    const errorPayload =
+    const logErrorStack = process.env.LOG_ERROR_STACK === 'true';
+    const safeErr =
       exception instanceof Error
-        ? {
-            type: exception.name,
-            ...(isTestEnv ? {} : { stack: exception.stack }),
-            ...(isProdEnv || isTestEnv ? {} : { message: exception.message }),
-          }
-        : { type: 'UnknownError' };
+        ? logErrorStack
+          ? {
+              name: exception.name,
+              message: exception.message,
+              stack: exception.stack,
+            }
+          : { name: exception.name }
+        : { name: 'UnknownError' };
 
     logger.error(
       {
         requestId,
         statusCode: status,
         path,
-        err: errorPayload,
+        err: safeErr,
       },
       'unhandled_exception',
     );

@@ -226,7 +226,11 @@ describe('Plan enforcement', () => {
     const store1Res = await app.inject({
       method: 'POST',
       url: '/api/v1/stores',
-      payload: { name: `S1 ${suffix}`, slug: `s1-${suffix}` },
+      payload: {
+        name: `S1 ${suffix}`,
+        slug: `s1-${suffix}`,
+        subdomain: `s1-${suffix}`,
+      },
       headers: {
         Authorization: `Bearer ${token}`,
         'X-Tenant-Id': tenantId,
@@ -237,7 +241,11 @@ describe('Plan enforcement', () => {
     const store2Res = await app.inject({
       method: 'POST',
       url: '/api/v1/stores',
-      payload: { name: `S2 ${suffix}`, slug: `s2-${suffix}` },
+      payload: {
+        name: `S2 ${suffix}`,
+        slug: `s2-${suffix}`,
+        subdomain: `s2-${suffix}`,
+      },
       headers: {
         Authorization: `Bearer ${token}`,
         'X-Tenant-Id': tenantId,
@@ -311,7 +319,11 @@ describe('Plan enforcement', () => {
     const storeRes = await app.inject({
       method: 'POST',
       url: '/api/v1/stores',
-      payload: { name: `Store ${suffix}`, slug: `store-${suffix}` },
+      payload: {
+        name: `Store ${suffix}`,
+        slug: `store-${suffix}`,
+        subdomain: `store-${suffix}`,
+      },
       headers: {
         Authorization: `Bearer ${token}`,
         'X-Tenant-Id': tenantId,

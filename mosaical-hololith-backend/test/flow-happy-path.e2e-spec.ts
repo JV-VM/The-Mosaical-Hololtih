@@ -192,7 +192,11 @@ describe('Happy Path (register -> tenant -> store)', () => {
     const storeRes = await app.inject({
       method: 'POST',
       url: '/api/v1/stores',
-      payload: { name: `Store ${suffix}`, slug: `store-${suffix}` },
+      payload: {
+        name: `Store ${suffix}`,
+        slug: `store-${suffix}`,
+        subdomain: `store-${suffix}`,
+      },
       headers: {
         Authorization: `Bearer ${token}`,
         'X-Tenant-Id': tenantId,

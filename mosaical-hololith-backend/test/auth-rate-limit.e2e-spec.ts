@@ -80,8 +80,8 @@ describe('Auth rate limit (e2e)', () => {
     await app.register(cors, { origin: env.CORS_ORIGIN, credentials: true });
 
     await app.register(rateLimit, {
-      global: false,
-      ...RATE_LIMIT_DEFAULT,
+      global: true,
+      ...RATE_LIMIT_AUTH_LOGIN,
     });
 
     const fastify = app.getHttpAdapter().getInstance();
@@ -109,10 +109,14 @@ describe('Auth rate limit (e2e)', () => {
         : [routeOptions.method];
       const isPost = methods.includes('POST');
 
-      if (isPost && routeOptions.url === AUTH_LOGIN_PATH) {
-        routeOptions.config = routeOptions.config ?? {};
-        routeOptions.config.rateLimit = RATE_LIMIT_AUTH_LOGIN;
-      }
+    if (
+      isPost &&
+      (routeOptions.url === AUTH_LOGIN_PATH ||
+        routeOptions.url === AUTH_LOGIN_PATH.replace(`/${API_PREFIX}`, ''))
+    ) {
+      routeOptions.config = routeOptions.config ?? {};
+      routeOptions.config.rateLimit = RATE_LIMIT_AUTH_LOGIN;
+    }
     });
 
     app.useGlobalFilters(new GlobalHttpExceptionFilter());

@@ -16,6 +16,7 @@ import { randomUUID } from 'crypto';
 import { AppModule } from '../src/app.module';
 import { env } from '../src/shared/env';
 import { GlobalHttpExceptionFilter } from '../src/shared/filters/global-http-exception.filter';
+import { debugResponse } from './setup-e2e';
 
 const API_PREFIX = 'api/v1';
 const REQUEST_ID_HEADER = 'x-request-id';
@@ -51,6 +52,8 @@ const getHeaderString = (value: unknown): string | undefined => {
   }
   return undefined;
 };
+
+const dayKeyUTC = (d: Date) => d.toISOString().slice(0, 10);
 
 const RATE_LIMIT_DEFAULT: RateLimitOptions = {
   max: 200,
@@ -201,12 +204,17 @@ describe('Analytics deduplication', () => {
     const storeRes = await app.inject({
       method: 'POST',
       url: '/api/v1/stores',
-      payload: { name: `Store ${suffix}`, slug: `store-${suffix}` },
+      payload: {
+        name: `Store ${suffix}`,
+        slug: `store-${suffix}`,
+        subdomain: `store-${suffix}`,
+      },
       headers: {
         Authorization: `Bearer ${token}`,
         'X-Tenant-Id': tenantId,
       },
     });
+    debugResponse(storeRes, 'createStore');
     expect(storeRes.statusCode).toBe(201);
 
     const storeBodyUnknown: unknown = storeRes.json();
@@ -231,6 +239,7 @@ describe('Analytics deduplication', () => {
       url: '/api/v1/analytics/view',
       payload: { type: 'STORE_VIEW', storeId, viewerId: viewerA },
     });
+    debugResponse(trackA1, 'trackView#1');
     expect(trackA1.statusCode).toBe(201);
 
     const trackA2 = await app.inject({
@@ -262,6 +271,20 @@ describe('Analytics deduplication', () => {
       where: { storeId, type: 'STORE_VIEW' },
       data: { createdAt: yesterday },
     });
+    const existingEvents = await prisma.analyticsEvent.findMany({
+      where: { storeId, type: 'STORE_VIEW' },
+      select: { id: true, viewerHash: true },
+    });
+    const yesterdayKey = dayKeyUTC(yesterday);
+    for (const event of existingEvents) {
+      if (!event.viewerHash) continue;
+      await prisma.analyticsEvent.update({
+        where: { id: event.id },
+        data: {
+          idempotencyKey: `STORE_VIEW:${storeId}:${event.viewerHash}:${yesterdayKey}`,
+        },
+      });
+    }
 
     const trackNextDay = await app.inject({
       method: 'POST',

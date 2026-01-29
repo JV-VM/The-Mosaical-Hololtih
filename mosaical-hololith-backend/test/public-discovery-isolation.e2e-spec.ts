@@ -14,6 +14,7 @@ import { randomUUID } from 'crypto';
 import { AppModule } from '../src/app.module';
 import { env } from '../src/shared/env';
 import { GlobalHttpExceptionFilter } from '../src/shared/filters/global-http-exception.filter';
+import { debugResponse } from './setup-e2e';
 
 const API_PREFIX = 'api/v1';
 const REQUEST_ID_HEADER = 'x-request-id';
@@ -190,12 +191,17 @@ describe('Public discovery isolation', () => {
     const storeRes = await app.inject({
       method: 'POST',
       url: '/api/v1/stores',
-      payload: { name: `Store ${suffix}`, slug: `store-${suffix}` },
+      payload: {
+        name: `Store ${suffix}`,
+        slug: `store-${suffix}`,
+        subdomain: `store-${suffix}`,
+      },
       headers: {
         Authorization: `Bearer ${token}`,
         'X-Tenant-Id': tenantId,
       },
     });
+    debugResponse(storeRes, 'createStore');
     expect(storeRes.statusCode).toBe(201);
 
     const storeBodyUnknown: unknown = storeRes.json();

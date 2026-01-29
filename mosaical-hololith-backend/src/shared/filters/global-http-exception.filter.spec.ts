@@ -57,10 +57,20 @@ function getSentBody(sendMock: jest.Mock): Record<string, unknown> {
 
 describe('GlobalHttpExceptionFilter', () => {
   let filter: GlobalHttpExceptionFilter;
+  const originalLogErrorStack = process.env.LOG_ERROR_STACK;
 
   beforeEach(() => {
     filter = new GlobalHttpExceptionFilter();
     (logger.error as jest.Mock).mockClear();
+    delete process.env.LOG_ERROR_STACK;
+  });
+
+  afterEach(() => {
+    if (originalLogErrorStack === undefined) {
+      delete process.env.LOG_ERROR_STACK;
+    } else {
+      process.env.LOG_ERROR_STACK = originalLogErrorStack;
+    }
   });
 
   it('uses the HttpException status and response payload', () => {
@@ -119,5 +129,27 @@ describe('GlobalHttpExceptionFilter', () => {
     expect(logger.error).toHaveBeenCalled();
     const logArgs = JSON.stringify((logger.error as jest.Mock).mock.calls);
     expect(logArgs).not.toContain('sensitive details');
+  });
+
+  it('can log error details when LOG_ERROR_STACK=true', () => {
+    process.env.LOG_ERROR_STACK = 'true';
+    const response: ResponseLike = {
+      code: jest.fn(),
+      send: jest.fn(),
+    };
+    (response.code as jest.Mock).mockImplementation(() => response);
+
+    const request: RequestLike = {
+      id: 'req-3',
+      url: '/boom',
+      headers: {},
+    };
+
+    const host = createHost(request, response);
+    filter.catch(new Error('sensitive details'), host);
+
+    expect(logger.error).toHaveBeenCalled();
+    const logArgs = JSON.stringify((logger.error as jest.Mock).mock.calls);
+    expect(logArgs).toContain('sensitive details');
   });
 });
