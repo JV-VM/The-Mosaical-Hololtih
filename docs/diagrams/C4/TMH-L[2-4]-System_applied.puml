@@ -1,0 +1,403 @@
+' =========================================================
+' The Mosaical Hololith - C4 Pack (L1 + L2 + L3 Backend + L3 Frontend)
+' =========================================================
+
+' ---------- Shared includes (C4) ----------
+' (Each diagram below includes what it needs, but keeping
+' this header comment for clarity.)
+' NOTE: Some renderers require includes per @startuml block.
+
+' =========================================================
+' C4 L1 - Containers (reference frame for L3)
+' =========================================================
+
+@startuml The_Mosaical_Hololith_C4_L2_Containers
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+title The Mosaical Hololith - Containers (C4 L2)
+
+Person(visitor, "Visitor", "Explores hub and storefronts.")
+Person(producer, "Producer", "Manages stores & catalog.")
+Person(tenantAdmin, "Tenant Admin", "Plan/billing, domains, team.")
+Person(platformAdmin, "Platform Admin", "Tags/policies, moderation.")
+
+System_Boundary(se, "The Mosaical Hololith Platform") {
+  Container(webHub, "Public Hub Web App", "Angular or React", "Landing, Explore, Tag pages, Storefront viewing.")
+  Container(dashboard, "Producer Dashboard Web App", "Angular (recommended)", "Tenant/store management, pages, catalog, analytics, billing UI.")
+  Container(admin, "Platform Admin Web App", "Angular/React", "Internal admin: tags, stores, reports, moderation.")
+
+  Container(api, "Backend API", "NestJS", "Auth, tenancy, stores, pages, catalog, tags, discovery, plans/quotas, analytics.")
+  ContainerDb(db, "Primary Database", "PostgreSQL", "Tenants, stores, pages, products, tags, subscriptions, analytics aggregates.")
+  Container(cache, "Cache", "Redis", "Rate limiting, sessions (optional), hot discovery queries (optional).")
+  Container(storage, "Object Storage", "S3-compatible", "Product/store media assets.")
+}
+
+System_Ext(email, "Email Provider", "Transactional email (verification, invites).")
+System_Ext(payment, "Payment Provider (Phase 2)", "Subscriptions & payments.")
+System_Ext(dns, "DNS Provider", "Domain verification via DNS records.")
+
+Rel(visitor, webHub, "Browse/Explore", "HTTPS")
+Rel(producer, dashboard, "Manage stores & products", "HTTPS")
+Rel(tenantAdmin, dashboard, "Billing/domains/team", "HTTPS")
+Rel(platformAdmin, admin, "Moderation & governance", "HTTPS")
+
+Rel(webHub, api, "Reads public store/catalog/discovery", "HTTPS/JSON")
+Rel(dashboard, api, "CRUD + management operations", "HTTPS/JSON")
+Rel(admin, api, "Admin operations", "HTTPS/JSON")
+
+Rel(api, db, "Reads/Writes", "SQL")
+Rel(api, cache, "Caching / Rate limiting", "TCP")
+Rel(api, storage, "Upload/serve media", "HTTPS (S3 API)")
+Rel(api, email, "Send emails", "SMTP/API")
+Rel(api, dns, "Domain verification checks", "DNS")
+Rel(api, payment, "Create subscriptions (later)", "API/Webhooks")
+
+@enduml
+
+
+' =========================================================
+' C4 L3 - Backend Components (NestJS) - Layered
+' API Layer -> Application -> Domain -> Infrastructure
+' =========================================================
+@startuml The_Mosaical_Hololith_C4_L3_Backend
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title The Mosaical Hololith - Backend API Components (C4 L3, Layered)
+
+Person(producer, "Producer", "Uses dashboard to manage stores/products.")
+Person(visitor, "Visitor", "Uses hub to browse stores/products.")
+Person(platformAdmin, "Platform Admin", "Moderation + taxonomy governance.")
+
+Container(api, "Backend API", "NestJS", "Modular monolith API with strict tenant isolation.")
+ContainerDb(db, "PostgreSQL", "Database", "Primary relational store.")
+Container(cache, "Redis", "Cache", "Rate limit + caching (optional).")
+Container(storage, "S3 Storage", "Object Storage", "Media assets.")
+System_Ext(email, "Email Provider", "SMTP/API")
+System_Ext(dns, "DNS Provider", "DNS")
+System_Ext(payment, "Payment Provider (Phase 2)", "API/Webhooks")
+
+Rel(producer, api, "Uses", "HTTPS/JSON")
+Rel(visitor, api, "Uses", "HTTPS/JSON")
+Rel(platformAdmin, api, "Uses", "HTTPS/JSON")
+
+' ---- Backend boundary ----
+Container_Boundary(b, "Backend API (NestJS)") {
+
+  ' =========================
+  ' API Layer (Controllers/Guards)
+  ' =========================
+  Boundary(apiLayer, "API Layer") {
+    Component(AuthController, "AuthController", "NestJS Controller", "Register/login/refresh/reset.")
+    Component(TenantController, "TenantController", "NestJS Controller", "Tenants + memberships.")
+    Component(StoreController, "StoreController", "NestJS Controller", "Store CRUD + publish.")
+    Component(PageController, "PageController", "NestJS Controller", "Page CRUD.")
+    Component(CatalogController, "CatalogController", "NestJS Controller", "Product/Service CRUD.")
+    Component(TagController, "TagController", "NestJS Controller", "Tag assignment + public tags.")
+    Component(DiscoveryController, "DiscoveryController", "NestJS Controller", "Explore/search endpoints.")
+    Component(BillingController, "BillingController", "NestJS Controller", "Plan/usage/upgrade stub.")
+    Component(AdminController, "AdminController", "NestJS Controller", "Admin moderation + policies.")
+
+    Component(AuthGuard, "AuthGuard", "Guard", "AuthN.")
+    Component(TenantGuard, "TenantGuard", "Guard", "Tenant isolation.")
+    Component(QuotaGuard, "QuotaGuard", "Guard", "Plan quotas + feature gates.")
+    Component(RateLimitGuard, "RateLimitGuard", "Guard", "Anti-abuse on auth/public endpoints.")
+  }
+
+  ' =========================
+  ' Application Layer (Use-cases)
+  ' =========================
+  Boundary(appLayer, "Application Layer (Use Cases)") {
+    Component(AuthService, "AuthService", "Service", "Auth use cases (register/login/refresh).")
+    Component(TenantService, "TenantService", "Service", "Create tenant, invite, role mgmt.")
+    Component(StoreService, "StoreService", "Service", "Create/update/publish store.")
+    Component(PageService, "PageService", "Service", "Create/update pages.")
+    Component(CatalogService, "CatalogService", "Service", "Create/update/publish products/services.")
+    Component(TaggingService, "TaggingService", "Service", "Assign tags w/ policy checks.")
+    Component(DiscoveryService, "DiscoveryService", "Service", "Build/read explore queries.")
+    Component(PlanService, "PlanService", "Service", "Resolve plan, usage, quota policies.")
+    Component(MediaService, "MediaService", "Service", "Upload, validate limits.")
+    Component(AnalyticsService, "AnalyticsService", "Service", "Ingest events + aggregates.")
+    Component(ModerationService, "ModerationService", "Service", "Suspend/unpublish, reports.")
+  }
+
+  ' =========================
+  ' Domain Layer (Core model)
+  ' =========================
+  Boundary(domainLayer, "Domain Layer (Core)") {
+    Component(DomainEntities, "Entities/ValueObjects", "Domain", "User, Tenant, Store, Product, Tag, Subscription, etc.")
+    Component(DomainPolicies, "Policies/Rules", "Domain", "Tag tiers, store publish rules, quota rules.")
+    Component(DomainEvents, "Domain Events", "Domain", "StorePublished, ProductPublished, TagAssigned, etc.")
+  }
+
+  ' =========================
+  ' Infrastructure Layer (Adapters)
+  ' =========================
+  Boundary(infraLayer, "Infrastructure Layer") {
+    Component(UserRepo, "UserRepository", "Prisma/ORM Repo", "Users persistence.")
+    Component(TenantRepo, "TenantRepository", "Prisma/ORM Repo", "Tenants & memberships.")
+    Component(StoreRepo, "StoreRepository", "Prisma/ORM Repo", "Stores persistence.")
+    Component(PageRepo, "PageRepository", "Prisma/ORM Repo", "Pages persistence.")
+    Component(ProductRepo, "ProductRepository", "Prisma/ORM Repo", "Catalog persistence.")
+    Component(TagRepo, "TagRepository", "Prisma/ORM Repo", "Tags persistence.")
+    Component(SubscriptionRepo, "SubscriptionRepository", "Prisma/ORM Repo", "Plans/subscriptions/usage.")
+    Component(DiscoveryReadRepo, "DiscoveryReadRepository", "SQL/Read Model", "Explore queries, indexes.")
+
+    Component(CacheAdapter, "CacheAdapter", "Redis Adapter", "Rate limit + caching.")
+    Component(StorageAdapter, "StorageAdapter", "S3 Adapter", "Uploads + signed URLs.")
+    Component(EmailAdapter, "EmailAdapter", "SMTP/API Adapter", "Verification/invites.")
+    Component(DNSAdapter, "DNSAdapter", "DNS Adapter", "Domain verification checks.")
+    Component(PaymentAdapter, "PaymentAdapter", "Payments Adapter", "Subscriptions (Phase 2).")
+  }
+}
+
+' ---- Relationships: API layer -> App layer ----
+Rel(AuthController, AuthService, "calls")
+Rel(TenantController, TenantService, "calls")
+Rel(StoreController, StoreService, "calls")
+Rel(PageController, PageService, "calls")
+Rel(CatalogController, CatalogService, "calls")
+Rel(TagController, TaggingService, "calls")
+Rel(DiscoveryController, DiscoveryService, "calls")
+Rel(BillingController, PlanService, "calls")
+Rel(AdminController, ModerationService, "calls")
+
+Rel(AuthGuard, AuthService, "uses")
+Rel(TenantGuard, TenantService, "uses")
+Rel(QuotaGuard, PlanService, "uses")
+Rel(RateLimitGuard, CacheAdapter, "uses", "Redis")
+
+' ---- App layer -> Domain ----
+Rel(AuthService, DomainEntities, "uses")
+Rel(StoreService, DomainPolicies, "enforces")
+Rel(CatalogService, DomainPolicies, "enforces")
+Rel(TaggingService, DomainPolicies, "enforces")
+Rel(PlanService, DomainPolicies, "resolves quotas/features")
+Rel(ModerationService, DomainPolicies, "enforces")
+Rel(AnalyticsService, DomainEvents, "consumes")
+
+' ---- App layer -> Infra ----
+Rel(AuthService, UserRepo, "reads/writes")
+Rel(TenantService, TenantRepo, "reads/writes")
+Rel(StoreService, StoreRepo, "reads/writes")
+Rel(PageService, PageRepo, "reads/writes")
+Rel(CatalogService, ProductRepo, "reads/writes")
+Rel(TaggingService, TagRepo, "reads/writes")
+Rel(PlanService, SubscriptionRepo, "reads/writes")
+Rel(DiscoveryService, DiscoveryReadRepo, "reads")
+Rel(MediaService, StorageAdapter, "uploads")
+Rel(AuthService, EmailAdapter, "sends email")
+Rel(StoreService, DNSAdapter, "verifies domain")
+Rel(PlanService, PaymentAdapter, "billing (phase 2)")
+Rel(AnalyticsService, DiscoveryReadRepo, "updates read model (optional)")
+Rel(AnalyticsService, CacheAdapter, "optional caching")
+
+' ---- Infra -> external systems ----
+Rel(UserRepo, db, "SQL")
+Rel(TenantRepo, db, "SQL")
+Rel(StoreRepo, db, "SQL")
+Rel(PageRepo, db, "SQL")
+Rel(ProductRepo, db, "SQL")
+Rel(TagRepo, db, "SQL")
+Rel(SubscriptionRepo, db, "SQL")
+Rel(DiscoveryReadRepo, db, "SQL")
+Rel(CacheAdapter, cache, "TCP")
+Rel(StorageAdapter, storage, "HTTPS (S3 API)")
+Rel(EmailAdapter, email, "SMTP/API")
+Rel(DNSAdapter, dns, "DNS")
+Rel(PaymentAdapter, payment, "API/Webhooks")
+
+@enduml
+
+
+' =========================================================
+' C4 L3 - Frontend Components (Layered)
+' (Public Hub + Producer Dashboard + Admin)
+' UI -> State -> Services -> API/Infra
+' =========================================================
+@startuml The_Mosaical_Hololith_C4_L3_Frontend
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title The Mosaical Hololith - Frontend Components (C4 L3, Layered)
+
+Person(visitor, "Visitor", "Browses discovery hub and storefronts.")
+Person(producer, "Producer", "Uses dashboard to manage stores/products.")
+Person(platformAdmin, "Platform Admin", "Uses admin to govern tags/moderate.")
+
+Container(webHub, "Public Hub Web App", "Angular or React", "Public discovery + storefront viewing.")
+Container(dashboard, "Producer Dashboard Web App", "Angular", "Store builder + catalog + analytics + billing.")
+Container(admin, "Platform Admin Web App", "Angular/React", "Moderation + taxonomy governance.")
+Container(api, "Backend API", "NestJS", "JSON API")
+
+Rel(visitor, webHub, "Uses", "HTTPS")
+Rel(producer, dashboard, "Uses", "HTTPS")
+Rel(platformAdmin, admin, "Uses", "HTTPS")
+
+Rel(webHub, api, "Calls API", "HTTPS/JSON")
+Rel(dashboard, api, "Calls API", "HTTPS/JSON")
+Rel(admin, api, "Calls API", "HTTPS/JSON")
+
+' -----------------------------
+' Public Hub - components
+' -----------------------------
+Container_Boundary(hub, "Public Hub Web App") {
+
+  Boundary(hubUI, "UI Layer") {
+    Component(HubRouter, "Router", "Routing", "Routes: /, /explore, /tags/:slug, /stores/:slug, /products/:slug")
+    Component(HomePage, "HomePage", "UI", "Featured tags, recent stores/products.")
+    Component(ExplorePage, "ExplorePage", "UI", "Search + filter + pagination.")
+    Component(TagPage, "TagPage", "UI", "Tag landing + results.")
+    Component(StorefrontPage, "StorefrontPage", "UI", "Store public pages + catalog list.")
+    Component(ProductPage, "ProductPage", "UI", "Product/service detail view.")
+    Component(HubComponents, "Shared UI Components", "UI", "Cards, filters, pagination, header/footer.")
+  }
+
+  Boundary(hubState, "State Layer") {
+    Component(HubStore, "HubState/Store", "State", "Explore query state, filters, pagination.")
+  }
+
+  Boundary(hubServices, "Service Layer") {
+    Component(DiscoveryClient, "DiscoveryClient", "Service", "Explore/search endpoints.")
+    Component(StorefrontClient, "StorefrontClient", "Service", "Fetch store + pages + products.")
+    Component(AnalyticsClient, "AnalyticsClient", "Service", "Send view/search/tag click events.")
+  }
+
+  Boundary(hubInfra, "API/Infra") {
+    Component(ApiHttp, "HTTP Client", "Infra", "HTTP wrapper, interceptors, retries.")
+    Component(CacheLocal, "Local Cache", "Infra", "Optional: cache recent searches.")
+  }
+}
+
+Rel(HubRouter, HomePage, "routes to")
+Rel(HubRouter, ExplorePage, "routes to")
+Rel(HubRouter, TagPage, "routes to")
+Rel(HubRouter, StorefrontPage, "routes to")
+Rel(HubRouter, ProductPage, "routes to")
+
+Rel(ExplorePage, HubStore, "reads/writes state")
+Rel(TagPage, HubStore, "reads/writes state")
+
+Rel(HubStore, DiscoveryClient, "calls")
+Rel(StorefrontPage, StorefrontClient, "calls")
+Rel(ProductPage, StorefrontClient, "calls")
+Rel(ExplorePage, AnalyticsClient, "tracks")
+Rel(StorefrontPage, AnalyticsClient, "tracks")
+Rel(ProductPage, AnalyticsClient, "tracks")
+
+Rel(DiscoveryClient, ApiHttp, "uses")
+Rel(StorefrontClient, ApiHttp, "uses")
+Rel(AnalyticsClient, ApiHttp, "uses")
+
+
+' -----------------------------
+' Producer Dashboard - components
+' -----------------------------
+Container_Boundary(dash, "Producer Dashboard Web App") {
+
+  Boundary(dashUI, "UI Layer") {
+    Component(DashRouter, "Router", "Routing", "Routes: /dashboard/*")
+    Component(AuthPages, "Auth Pages", "UI", "Login/register/reset.")
+    Component(OverviewPage, "OverviewPage", "UI", "Store status + usage summary.")
+    Component(StoreSettingsPage, "StoreSettingsPage", "UI", "Settings, publish/unpublish.")
+    Component(ThemePage, "ThemePage", "UI", "Pick theme, basic customization.")
+    Component(PagesEditorPage, "PagesEditorPage", "UI", "Manage pages.")
+    Component(CatalogPage, "CatalogPage", "UI", "Products list + editor.")
+    Component(TagsPage, "TagsPage", "UI", "Assign tags, warnings.")
+    Component(DomainPage, "DomainPage", "UI", "Subdomain + custom domain verification.")
+    Component(AnalyticsPage, "AnalyticsPage", "UI", "Basic metrics.")
+    Component(BillingPage, "BillingPage", "UI", "Plan + quotas + upgrade stub.")
+    Component(TeamPage, "TeamPage", "UI", "Members, invites.")
+    Component(DashComponents, "Shared Dashboard Components", "UI", "Tables, forms, modals, quota meters.")
+  }
+
+  Boundary(dashState, "State Layer") {
+    Component(SessionState, "Session State", "State", "JWT/session, active tenant/store.")
+    Component(StoreState, "Store State", "State", "Current store, draft/published status.")
+    Component(UsageState, "Usage State", "State", "Quotas + usage counters.")
+  }
+
+  Boundary(dashServices, "Service Layer") {
+    Component(AuthClient, "AuthClient", "Service", "Auth endpoints.")
+    Component(TenantClient, "TenantClient", "Service", "Tenants/memberships.")
+    Component(StoreClient, "StoreClient", "Service", "Store CRUD/publish.")
+    Component(PageClient, "PageClient", "Service", "Pages CRUD.")
+    Component(CatalogClient, "CatalogClient", "Service", "Products/services CRUD.")
+    Component(TagClient, "TagClient", "Service", "Tags list + assignment.")
+    Component(DomainClient, "DomainClient", "Service", "Domain verify.")
+    Component(PlanClient, "PlanClient", "Service", "Plan/usage/upgrade stub.")
+    Component(MediaClient, "MediaClient", "Service", "Uploads, constraints.")
+  }
+
+  Boundary(dashInfra, "API/Infra") {
+    Component(DashHttp, "HTTP Client", "Infra", "Auth interceptor, tenant header, error mapping.")
+    Component(Guards, "Route Guards", "Infra", "AuthGuard, TenantGuard.")
+  }
+}
+
+Rel(DashRouter, OverviewPage, "routes to")
+Rel(DashRouter, StoreSettingsPage, "routes to")
+Rel(DashRouter, CatalogPage, "routes to")
+Rel(DashRouter, BillingPage, "routes to")
+Rel(Guards, DashRouter, "protects")
+
+Rel(AuthPages, AuthClient, "calls")
+Rel(TeamPage, TenantClient, "calls")
+Rel(StoreSettingsPage, StoreClient, "calls")
+Rel(PagesEditorPage, PageClient, "calls")
+Rel(CatalogPage, CatalogClient, "calls")
+Rel(TagsPage, TagClient, "calls")
+Rel(DomainPage, DomainClient, "calls")
+Rel(BillingPage, PlanClient, "calls")
+Rel(CatalogPage, MediaClient, "uploads via")
+
+Rel(AuthClient, DashHttp, "uses")
+Rel(TenantClient, DashHttp, "uses")
+Rel(StoreClient, DashHttp, "uses")
+Rel(PageClient, DashHttp, "uses")
+Rel(CatalogClient, DashHttp, "uses")
+Rel(TagClient, DashHttp, "uses")
+Rel(DomainClient, DashHttp, "uses")
+Rel(PlanClient, DashHttp, "uses")
+Rel(MediaClient, DashHttp, "uses")
+
+Rel(SessionState, DashHttp, "provides token/tenant context")
+Rel(StoreState, StoreClient, "syncs")
+Rel(UsageState, PlanClient, "syncs")
+
+
+' -----------------------------
+' Platform Admin - components
+' -----------------------------
+Container_Boundary(adm, "Platform Admin Web App") {
+
+  Boundary(adminUI, "UI Layer") {
+    Component(AdminRouter, "Router", "Routing", "Routes: /admin/*")
+    Component(AdminTagsPage, "Tags & Policies Page", "UI", "Create tags, set tiers/policies.")
+    Component(AdminStoresPage, "Stores Page", "UI", "Search/inspect stores.")
+    Component(AdminReportsPage, "Reports Page", "UI", "View/resolve reports.")
+    Component(AdminModerationUI, "Moderation Actions", "UI", "Suspend/unpublish store.")
+  }
+
+  Boundary(adminState, "State Layer") {
+    Component(AdminSession, "Admin Session State", "State", "Admin auth context.")
+  }
+
+  Boundary(adminServices, "Service Layer") {
+    Component(AdminClient, "AdminClient", "Service", "Admin endpoints.")
+    Component(AdminTagClient, "AdminTagClient", "Service", "Tag governance.")
+    Component(AdminModerationClient, "AdminModerationClient", "Service", "Suspend/unpublish.")
+  }
+
+  Boundary(adminInfra, "API/Infra") {
+    Component(AdminHttp, "HTTP Client", "Infra", "Admin auth interceptor, error mapping.")
+    Component(AdminGuards, "Route Guards", "Infra", "Admin-only access.")
+  }
+}
+
+Rel(AdminGuards, AdminRouter, "protects")
+Rel(AdminTagsPage, AdminTagClient, "calls")
+Rel(AdminStoresPage, AdminClient, "calls")
+Rel(AdminReportsPage, AdminClient, "calls")
+Rel(AdminModerationUI, AdminModerationClient, "calls")
+
+Rel(AdminClient, AdminHttp, "uses")
+Rel(AdminTagClient, AdminHttp, "uses")
+Rel(AdminModerationClient, AdminHttp, "uses")
+
+@enduml

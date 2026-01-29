@@ -1,0 +1,221 @@
+@startuml
+skinparam classAttributeIconSize 0
+
+' ====== Enums ======
+enum StoreStatus {
+  DRAFT
+  PUBLISHED
+  SUSPENDED
+}
+
+enum ProductType {
+  PRODUCT
+  SERVICE
+}
+
+enum PublishStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum TagTier {
+  A
+  B
+  C
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+enum DomainStatus {
+  NONE
+  PENDING_VERIFICATION
+  VERIFIED
+}
+
+' ====== Core Identity ======
+class User {
+  +id: UUID
+  +email: string
+  +passwordHash: string
+  +status: string
+  +createdAt: DateTime
+}
+
+class Tenant {
+  +id: UUID
+  +name: string
+  +ownerUserId: UUID
+  +createdAt: DateTime
+}
+
+class Membership {
+  +tenantId: UUID
+  +userId: UUID
+  +role: string
+  +createdAt: DateTime
+}
+
+User "1" -- "0..*" Membership
+Tenant "1" -- "0..*" Membership
+
+' ====== Plans / Billing ======
+class Plan {
+  +id: UUID
+  +name: string
+  +quotasJson: json
+  +featuresJson: json
+}
+
+class Subscription {
+  +id: UUID
+  +tenantId: UUID
+  +planId: UUID
+  +status: SubscriptionStatus
+  +periodStart: DateTime
+  +periodEnd: DateTime
+}
+
+class UsageMetric {
+  +id: UUID
+  +tenantId: UUID
+  +metric: string  ' e.g. products_count, storage_bytes
+  +value: number
+  +period: string  ' e.g. 2026-01
+}
+
+Tenant "1" -- "0..1" Subscription
+Plan "1" -- "0..*" Subscription
+Tenant "1" -- "0..*" UsageMetric
+
+' ====== Stores / Sites ======
+class Store {
+  +id: UUID
+  +tenantId: UUID
+  +slug: string
+  +name: string
+  +status: StoreStatus
+  +subdomain: string
+  +customDomain: string?
+  +domainStatus: DomainStatus
+  +themeId: UUID?
+  +createdAt: DateTime
+}
+
+class Page {
+  +id: UUID
+  +storeId: UUID
+  +slug: string
+  +title: string
+  +content: text ' blocks/json/markdown
+  +createdAt: DateTime
+}
+
+Tenant "1" -- "0..*" Store
+Store "1" -- "0..*" Page
+
+' ====== Catalog ======
+class Product {
+  +id: UUID
+  +storeId: UUID
+  +slug: string
+  +title: string
+  +description: text
+  +type: ProductType
+  +price: decimal
+  +currency: string
+  +status: PublishStatus
+  +createdAt: DateTime
+}
+
+Store "1" -- "0..*" Product
+
+class MediaAsset {
+  +id: UUID
+  +ownerType: string ' STORE|PRODUCT|PAGE
+  +ownerId: UUID
+  +url: string
+  +sizeBytes: number
+  +mimeType: string
+  +createdAt: DateTime
+}
+
+Store "0..*" -- "0..*" MediaAsset : assets >
+Product "0..*" -- "0..*" MediaAsset : media >
+
+' ====== Tags / Taxonomy ======
+class Tag {
+  +id: UUID
+  +slug: string
+  +name: string
+  +tier: TagTier
+  +policyFlags: json
+}
+
+class StoreTag {
+  +storeId: UUID
+  +tagId: UUID
+  +createdAt: DateTime
+}
+
+class ProductTag {
+  +productId: UUID
+  +tagId: UUID
+  +createdAt: DateTime
+}
+
+Store "1" -- "0..*" StoreTag
+Tag "1" -- "0..*" StoreTag
+
+Product "1" -- "0..*" ProductTag
+Tag "1" -- "0..*" ProductTag
+
+' ====== Discovery (read model) ======
+class StoreIndex {
+  +storeId: UUID
+  +searchText: text
+  +isPublished: bool
+  +tags: string[]
+  +updatedAt: DateTime
+}
+
+class ProductIndex {
+  +productId: UUID
+  +storeId: UUID
+  +searchText: text
+  +isPublished: bool
+  +tags: string[]
+  +updatedAt: DateTime
+}
+
+Store "1" .. "0..1" StoreIndex : indexed as >
+Product "1" .. "0..1" ProductIndex : indexed as >
+
+' ====== Analytics ======
+class AnalyticsEvent {
+  +id: UUID
+  +type: string ' STORE_VIEW | PRODUCT_VIEW | TAG_CLICK | SEARCH
+  +storeId: UUID?
+  +productId: UUID?
+  +tagId: UUID?
+  +viewerHash: string?
+  +createdAt: DateTime
+}
+
+class DailyAggregate {
+  +id: UUID
+  +storeId: UUID
+  +date: Date
+  +storeViews: number
+  +productViews: number
+  +tagClicks: number
+  +searches: number
+}
+
+Store "1" -- "0..*" AnalyticsEvent
+Store "1" -- "0..*" DailyAggregate
+
+@enduml

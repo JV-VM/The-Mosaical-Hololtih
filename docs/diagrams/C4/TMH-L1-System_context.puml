@@ -1,0 +1,34 @@
+
+@startuml The_Mosaical_Hololith_C4_L1_Context
+' C4-PlantUML (Level 1: System Context)
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title The Mosaical Hololith - System Context (C4 L1)
+
+Person(visitor, "Visitor", "Browses the hub, explores stores/products.")
+Person(customer, "Customer (optional)", "May authenticate, save preferences later.")
+Person(producer, "Producer", "Creates and manages a storefront, products/services.")
+Person(tenantAdmin, "Tenant Admin", "Manages team, billing/plan, domains.")
+Person(platformAdmin, "Platform Admin", "Manages tags/policies, moderation.")
+
+System_Boundary(se, "The Mosaical Hololith Platform") {
+  System(saas, "The Mosaical Hololith", "Multi-tenant storefront SaaS + central discovery hub.")
+}
+
+System_Ext(payment, "Payment Provider (Phase 2)", "Stripe/Mercado Pago/etc.")
+System_Ext(email, "Email Provider", "Transactional email (verification/invites).")
+System_Ext(storage, "Object Storage", "Stores media assets (images/files).")
+System_Ext(dns, "DNS Provider", "Used for custom domain verification (CNAME/TXT).")
+
+Rel(visitor, saas, "Browse/Explore", "HTTPS")
+Rel(customer, saas, "Browse + (optional) authenticate", "HTTPS")
+Rel(producer, saas, "Manage stores, pages, catalog", "HTTPS")
+Rel(tenantAdmin, saas, "Billing/plan + domains + team", "HTTPS")
+Rel(platformAdmin, saas, "Moderation + tag governance", "HTTPS")
+
+Rel(saas, email, "Send verification/invite emails", "SMTP/API")
+Rel(saas, storage, "Upload and serve media", "S3 API/HTTPS")
+Rel(saas, dns, "Verify custom domains", "DNS records")
+Rel(saas, payment, "Charge subscriptions (later)", "API/Webhooks")
+
+@enduml
