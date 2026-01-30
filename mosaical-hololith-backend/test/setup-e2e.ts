@@ -28,7 +28,7 @@ export const debugResponse = (res: DebuggableResponse, label: string) => {
     body,
   };
   const text = JSON.stringify(payload);
-  // eslint-disable-next-line no-console
+
   console.log(text.slice(0, 2000));
 };
 

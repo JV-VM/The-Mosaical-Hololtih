@@ -60,152 +60,257 @@ Rel(api, payment, "Create subscriptions (later)", "API/Webhooks")
 ' =========================================================
 @startuml The_Mosaical_Hololith_C4_L3_Backend
 !includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
-title The Mosaical Hololith - Backend API Components (C4 L3, Layered)
+title The Mosaical Hololith - Backend API Components (C4 L3)
 
-Person(producer, "Producer", "Uses dashboard to manage stores/products.")
-Person(visitor, "Visitor", "Uses hub to browse stores/products.")
-Person(platformAdmin, "Platform Admin", "Moderation + taxonomy governance.")
+Person(visitor, "Visitor", "Browses hub & storefronts.")
+Person(producer, "Producer", "Manages stores, products, pages.")
+Person(tenantAdmin, "Tenant Admin", "Plan, billing, domains, team.")
+Person(platformAdmin, "Platform Admin", "Moderation & tag governance.")
 
-Container(api, "Backend API", "NestJS", "Modular monolith API with strict tenant isolation.")
-ContainerDb(db, "PostgreSQL", "Database", "Primary relational store.")
-Container(cache, "Redis", "Cache", "Rate limit + caching (optional).")
+Container(webHub, "Public Hub Web App", "Angular/React", "Discovery & browsing.")
+Container(dashboard, "Producer Dashboard", "Angular", "Tenant/store management.")
+Container(adminApp, "Admin Portal", "Angular/React", "Moderation & reporting.")
+
+ContainerDb(db, "PostgreSQL", "Database", "Users, tenants, stores, pages, products, tags, subscriptions, analytics.")
+Container(cache, "Redis", "Cache", "Rate limiting, sessions, query cache.")
 Container(storage, "S3 Storage", "Object Storage", "Media assets.")
-System_Ext(email, "Email Provider", "SMTP/API")
-System_Ext(dns, "DNS Provider", "DNS")
-System_Ext(payment, "Payment Provider (Phase 2)", "API/Webhooks")
+System_Ext(email, "Email Provider", "Transactional emails.")
+System_Ext(dns, "DNS Provider", "Domain verification.")
+System_Ext(payment, "Payment Provider", "Billing (Phase 2).")
 
-Rel(producer, api, "Uses", "HTTPS/JSON")
-Rel(visitor, api, "Uses", "HTTPS/JSON")
-Rel(platformAdmin, api, "Uses", "HTTPS/JSON")
-
-' ---- Backend boundary ----
-Container_Boundary(b, "Backend API (NestJS)") {
+' ---- Backend API Boundary ----
+Container_Boundary(apiBoundary, "Backend API (NestJS)") {
 
   ' =========================
-  ' API Layer (Controllers/Guards)
+  ' BOOTSTRAP & ENTRY
   ' =========================
-  Boundary(apiLayer, "API Layer") {
-    Component(AuthController, "AuthController", "NestJS Controller", "Register/login/refresh/reset.")
-    Component(TenantController, "TenantController", "NestJS Controller", "Tenants + memberships.")
-    Component(StoreController, "StoreController", "NestJS Controller", "Store CRUD + publish.")
-    Component(PageController, "PageController", "NestJS Controller", "Page CRUD.")
-    Component(CatalogController, "CatalogController", "NestJS Controller", "Product/Service CRUD.")
-    Component(TagController, "TagController", "NestJS Controller", "Tag assignment + public tags.")
-    Component(DiscoveryController, "DiscoveryController", "NestJS Controller", "Explore/search endpoints.")
-    Component(BillingController, "BillingController", "NestJS Controller", "Plan/usage/upgrade stub.")
-    Component(AdminController, "AdminController", "NestJS Controller", "Admin moderation + policies.")
+  Component(main, "main.ts", "Bootstrap", "App initialization, Fastify setup.")
+  Component(appModule, "AppModule", "Root Module", "Feature modules, middleware, config.")
+  Component(healthCtrl, "HealthController", "Health", "Readiness & liveness probes.")
 
-    Component(AuthGuard, "AuthGuard", "Guard", "AuthN.")
-    Component(TenantGuard, "TenantGuard", "Guard", "Tenant isolation.")
-    Component(QuotaGuard, "QuotaGuard", "Guard", "Plan quotas + feature gates.")
-    Component(RateLimitGuard, "RateLimitGuard", "Guard", "Anti-abuse on auth/public endpoints.")
+  ' =========================
+  ' MIDDLEWARE & GUARDS
+  ' =========================
+  Boundary(middleware, "Global Middleware & Guards") {
+    Component(reqLogger, "RequestLoggerMiddleware", "Middleware", "Request/response logging.")
+    Component(corsMiddleware, "CORS/Helmet", "Middleware", "Security headers, CORS.")
+    Component(rateLimitMiddleware, "Rate Limit", "Guard", "Anti-abuse via Redis.")
   }
 
   ' =========================
-  ' Application Layer (Use-cases)
+  ' API LAYER (Controllers)
   ' =========================
-  Boundary(appLayer, "Application Layer (Use Cases)") {
-    Component(AuthService, "AuthService", "Service", "Auth use cases (register/login/refresh).")
-    Component(TenantService, "TenantService", "Service", "Create tenant, invite, role mgmt.")
-    Component(StoreService, "StoreService", "Service", "Create/update/publish store.")
-    Component(PageService, "PageService", "Service", "Create/update pages.")
-    Component(CatalogService, "CatalogService", "Service", "Create/update/publish products/services.")
-    Component(TaggingService, "TaggingService", "Service", "Assign tags w/ policy checks.")
-    Component(DiscoveryService, "DiscoveryService", "Service", "Build/read explore queries.")
-    Component(PlanService, "PlanService", "Service", "Resolve plan, usage, quota policies.")
-    Component(MediaService, "MediaService", "Service", "Upload, validate limits.")
-    Component(AnalyticsService, "AnalyticsService", "Service", "Ingest events + aggregates.")
-    Component(ModerationService, "ModerationService", "Service", "Suspend/unpublish, reports.")
+  Boundary(apiLayer, "API Layer (Controllers & Guards)") {
+
+    Boundary(authModule, "Auth Module") {
+      Component(authCtrl, "AuthController", "Controller", "Register, login, refresh, reset.")
+      Component(authGuard, "JwtAuthGuard", "Guard", "JWT validation.")
+      Component(jwtStrategy, "JwtStrategy", "Auth Strategy", "Passport JWT extraction.")
+    }
+
+    Boundary(userModule, "Users Module") {
+      Component(userCtrl, "UsersController", "Controller", "User profile & account.")
+    }
+
+    Boundary(tenantModule, "Tenants Module") {
+      Component(tenantCtrl, "TenantsController", "Controller", "Tenant CRUD, memberships.")
+      Component(tenantGuard, "TenantGuard", "Guard", "Tenant isolation.")
+    }
+
+    Boundary(storeModule, "Stores Module") {
+      Component(storeCtrl, "StoresController", "Controller", "Store CRUD, publish/unpublish.")
+      Component(storeGuard, "StoreGuard", "Guard", "Store ownership check.")
+    }
+
+    Boundary(pageModule, "Pages Module") {
+      Component(pageCtrl, "PagesController", "Controller", "Page CRUD.")
+    }
+
+    Boundary(catalogModule, "Catalog Module") {
+      Component(catalogCtrl, "CatalogController", "Controller", "Product/Service CRUD.")
+      Component(jsonValidator, "JsonInputValidator", "Validator", "Media & field validation.")
+    }
+
+    Boundary(tagModule, "Tags Module") {
+      Component(tagCtrl, "TagsController", "Controller", "Tag assignment, browsing.")
+    }
+
+    Boundary(discoveryModule, "Discovery Module") {
+      Component(discoveryCtrl, "DiscoveryController", "Controller", "Explore/search endpoints.")
+    }
+
+    Boundary(planModule, "Plans Module") {
+      Component(planCtrl, "PlansController", "Controller", "Plan info, usage, quotas.")
+      Component(quotaGuard, "QuotaGuard", "Guard", "Enforce plan limits.")
+    }
+
+    Boundary(analyticsModule, "Analytics Module") {
+      Component(analyticsCtrl, "AnalyticsController", "Controller", "Event ingestion & queries.")
+    }
   }
 
   ' =========================
-  ' Domain Layer (Core model)
+  ' APPLICATION LAYER (Services)
   ' =========================
-  Boundary(domainLayer, "Domain Layer (Core)") {
-    Component(DomainEntities, "Entities/ValueObjects", "Domain", "User, Tenant, Store, Product, Tag, Subscription, etc.")
-    Component(DomainPolicies, "Policies/Rules", "Domain", "Tag tiers, store publish rules, quota rules.")
-    Component(DomainEvents, "Domain Events", "Domain", "StorePublished, ProductPublished, TagAssigned, etc.")
+  Boundary(appLayer, "Application Layer (Services)") {
+    Component(authSvc, "AuthService", "Service", "Auth use cases (register/login/refresh).")
+    Component(userSvc, "UsersService", "Service", "User profile management.")
+    Component(tenantSvc, "TenantsService", "Service", "Tenant lifecycle, memberships, roles.")
+    Component(storeSvc, "StoresService", "Service", "Create/update/publish stores, domain binding.")
+    Component(pageSvc, "PagesService", "Service", "Page CRUD with JSON content.")
+    Component(catalogSvc, "CatalogService", "Service", "Product/service lifecycle, pricing.")
+    Component(tagSvc, "TagsService", "Service", "Tag assignment, policy validation.")
+    Component(discoverySvc, "DiscoveryService", "Service", "Build/cache explore queries.")
+    Component(planSvc, "PlansService", "Service", "Subscription, quota resolution, features.")
+    Component(analyticsSvc, "AnalyticsService", "Service", "Event ingestion, deduplication, aggregation.")
   }
 
   ' =========================
-  ' Infrastructure Layer (Adapters)
+  ' DOMAIN LAYER
+  ' =========================
+  Boundary(domainLayer, "Domain Layer") {
+    Component(entities, "Entities", "Domain", "User, Tenant, Store, Page, Product, Tag, Subscription.")
+    Component(policies, "Policies & Rules", "Domain", "Publish rules, quota rules, access control.")
+    Component(domainEvents, "Domain Events", "Events", "StorePublished, ProductCreated, TagAssigned.")
+  }
+
+  ' =========================
+  ' INFRASTRUCTURE LAYER
   ' =========================
   Boundary(infraLayer, "Infrastructure Layer") {
-    Component(UserRepo, "UserRepository", "Prisma/ORM Repo", "Users persistence.")
-    Component(TenantRepo, "TenantRepository", "Prisma/ORM Repo", "Tenants & memberships.")
-    Component(StoreRepo, "StoreRepository", "Prisma/ORM Repo", "Stores persistence.")
-    Component(PageRepo, "PageRepository", "Prisma/ORM Repo", "Pages persistence.")
-    Component(ProductRepo, "ProductRepository", "Prisma/ORM Repo", "Catalog persistence.")
-    Component(TagRepo, "TagRepository", "Prisma/ORM Repo", "Tags persistence.")
-    Component(SubscriptionRepo, "SubscriptionRepository", "Prisma/ORM Repo", "Plans/subscriptions/usage.")
-    Component(DiscoveryReadRepo, "DiscoveryReadRepository", "SQL/Read Model", "Explore queries, indexes.")
 
-    Component(CacheAdapter, "CacheAdapter", "Redis Adapter", "Rate limit + caching.")
-    Component(StorageAdapter, "StorageAdapter", "S3 Adapter", "Uploads + signed URLs.")
-    Component(EmailAdapter, "EmailAdapter", "SMTP/API Adapter", "Verification/invites.")
-    Component(DNSAdapter, "DNSAdapter", "DNS Adapter", "Domain verification checks.")
-    Component(PaymentAdapter, "PaymentAdapter", "Payments Adapter", "Subscriptions (Phase 2).")
+    Boundary(repos, "Repositories (ORM)") {
+      Component(userRepo, "UserRepository", "Prisma", "User persistence.")
+      Component(tenantRepo, "TenantRepository", "Prisma", "Tenant & membership persistence.")
+      Component(storeRepo, "StoreRepository", "Prisma", "Store records.")
+      Component(pageRepo, "PageRepository", "Prisma", "Page records.")
+      Component(productRepo, "ProductRepository", "Prisma", "Product/service records.")
+      Component(tagRepo, "TagRepository", "Prisma", "Tag definitions & assignments.")
+      Component(subscriptionRepo, "SubscriptionRepository", "Prisma", "Plans, subscriptions, usage.")
+      Component(analyticsRepo, "AnalyticsRepository", "Prisma", "Events & aggregates.")
+    }
+
+    Boundary(adapters, "External Adapters") {
+      Component(prismaService, "PrismaService", "ORM", "Database connection & transactions.")
+      Component(cacheAdapter, "CacheAdapter", "Redis", "Rate limit, session, query cache.")
+      Component(storageAdapter, "StorageAdapter", "S3", "Upload/download, signed URLs.")
+      Component(emailAdapter, "EmailAdapter", "SMTP/API", "Verification, invites, notifications.")
+      Component(dnsAdapter, "DNSAdapter", "DNS", "Domain verification.")
+      Component(paymentAdapter, "PaymentAdapter", "Stripe/Mercado", "Subscriptions (Phase 2).")
+    }
+
+    Boundary(config, "Configuration & Utils") {
+      Component(envConfig, "env.ts", "Config", "Zod validation for env vars.")
+      Component(prismaModule, "PrismaModule", "Global Module", "Provides PrismaService.")
+      Component(typeUtils, "Types & DTOs", "Types", "Domain types, API contracts.")
+    }
   }
 }
 
-' ---- Relationships: API layer -> App layer ----
-Rel(AuthController, AuthService, "calls")
-Rel(TenantController, TenantService, "calls")
-Rel(StoreController, StoreService, "calls")
-Rel(PageController, PageService, "calls")
-Rel(CatalogController, CatalogService, "calls")
-Rel(TagController, TaggingService, "calls")
-Rel(DiscoveryController, DiscoveryService, "calls")
-Rel(BillingController, PlanService, "calls")
-Rel(AdminController, ModerationService, "calls")
+' =========================================================
+' RELATIONSHIPS
+' =========================================================
 
-Rel(AuthGuard, AuthService, "uses")
-Rel(TenantGuard, TenantService, "uses")
-Rel(QuotaGuard, PlanService, "uses")
-Rel(RateLimitGuard, CacheAdapter, "uses", "Redis")
+' Entry Point
+Rel(visitor, webHub, "uses", "browser")
+Rel(producer, dashboard, "uses", "browser")
+Rel(tenantAdmin, dashboard, "uses", "browser")
+Rel(platformAdmin, adminApp, "uses", "browser")
 
-' ---- App layer -> Domain ----
-Rel(AuthService, DomainEntities, "uses")
-Rel(StoreService, DomainPolicies, "enforces")
-Rel(CatalogService, DomainPolicies, "enforces")
-Rel(TaggingService, DomainPolicies, "enforces")
-Rel(PlanService, DomainPolicies, "resolves quotas/features")
-Rel(ModerationService, DomainPolicies, "enforces")
-Rel(AnalyticsService, DomainEvents, "consumes")
+Rel(webHub, main, "HTTP requests", "HTTPS")
+Rel(dashboard, main, "HTTP requests", "HTTPS")
+Rel(adminApp, main, "HTTP requests", "HTTPS")
 
-' ---- App layer -> Infra ----
-Rel(AuthService, UserRepo, "reads/writes")
-Rel(TenantService, TenantRepo, "reads/writes")
-Rel(StoreService, StoreRepo, "reads/writes")
-Rel(PageService, PageRepo, "reads/writes")
-Rel(CatalogService, ProductRepo, "reads/writes")
-Rel(TaggingService, TagRepo, "reads/writes")
-Rel(PlanService, SubscriptionRepo, "reads/writes")
-Rel(DiscoveryService, DiscoveryReadRepo, "reads")
-Rel(MediaService, StorageAdapter, "uploads")
-Rel(AuthService, EmailAdapter, "sends email")
-Rel(StoreService, DNSAdapter, "verifies domain")
-Rel(PlanService, PaymentAdapter, "billing (phase 2)")
-Rel(AnalyticsService, DiscoveryReadRepo, "updates read model (optional)")
-Rel(AnalyticsService, CacheAdapter, "optional caching")
+' Bootstrap Chain
+Rel(main, appModule, "bootstraps")
+Rel(appModule, healthCtrl, "registers")
+Rel(appModule, reqLogger, "applies")
+Rel(appModule, corsMiddleware, "applies")
 
-' ---- Infra -> external systems ----
-Rel(UserRepo, db, "SQL")
-Rel(TenantRepo, db, "SQL")
-Rel(StoreRepo, db, "SQL")
-Rel(PageRepo, db, "SQL")
-Rel(ProductRepo, db, "SQL")
-Rel(TagRepo, db, "SQL")
-Rel(SubscriptionRepo, db, "SQL")
-Rel(DiscoveryReadRepo, db, "SQL")
-Rel(CacheAdapter, cache, "TCP")
-Rel(StorageAdapter, storage, "HTTPS (S3 API)")
-Rel(EmailAdapter, email, "SMTP/API")
-Rel(DNSAdapter, dns, "DNS")
-Rel(PaymentAdapter, payment, "API/Webhooks")
+' API Controllers to Guards
+Rel(authCtrl, authGuard, "uses")
+Rel(authCtrl, jwtStrategy, "uses")
+Rel(tenantCtrl, tenantGuard, "uses")
+Rel(storeCtrl, storeGuard, "uses")
+Rel(planCtrl, quotaGuard, "uses")
+Rel(catalogCtrl, quotaGuard, "uses")
+
+' Middleware to Adapters
+Rel(rateLimitMiddleware, cacheAdapter, "uses", "Redis")
+
+' Controllers to Services
+Rel(authCtrl, authSvc, "calls")
+Rel(userCtrl, userSvc, "calls")
+Rel(tenantCtrl, tenantSvc, "calls")
+Rel(storeCtrl, storeSvc, "calls")
+Rel(pageCtrl, pageSvc, "calls")
+Rel(catalogCtrl, catalogSvc, "calls")
+Rel(tagCtrl, tagSvc, "calls")
+Rel(discoveryCtrl, discoverySvc, "calls")
+Rel(planCtrl, planSvc, "calls")
+Rel(analyticsCtrl, analyticsSvc, "calls")
+
+' Guards to Services
+Rel(authGuard, authSvc, "validates with")
+Rel(tenantGuard, tenantSvc, "validates with")
+Rel(quotaGuard, planSvc, "checks with")
+
+' Services to Domain
+Rel(authSvc, entities, "uses")
+Rel(authSvc, policies, "enforces")
+Rel(tenantSvc, entities, "uses")
+Rel(storeSvc, entities, "uses")
+Rel(storeSvc, policies, "enforces")
+Rel(storeSvc, domainEvents, "publishes")
+Rel(catalogSvc, entities, "uses")
+Rel(catalogSvc, policies, "enforces")
+Rel(tagSvc, policies, "enforces")
+Rel(analyticsSvc, domainEvents, "consumes")
+
+' Services to Repositories
+Rel(authSvc, userRepo, "reads/writes")
+Rel(userSvc, userRepo, "reads/writes")
+Rel(tenantSvc, tenantRepo, "reads/writes")
+Rel(storeSvc, storeRepo, "reads/writes")
+Rel(pageSvc, pageRepo, "reads/writes")
+Rel(catalogSvc, productRepo, "reads/writes")
+Rel(tagSvc, tagRepo, "reads/writes")
+Rel(discoverySvc, storeRepo, "queries")
+Rel(discoverySvc, productRepo, "queries")
+Rel(planSvc, subscriptionRepo, "reads")
+Rel(analyticsSvc, analyticsRepo, "reads/writes")
+
+' Services to Adapters
+Rel(storeSvc, dnsAdapter, "verifies domains")
+Rel(discoverySvc, cacheAdapter, "caches results")
+Rel(authSvc, emailAdapter, "sends emails")
+Rel(catalogSvc, storageAdapter, "uploads")
+Rel(planSvc, paymentAdapter, "coordinates")
+
+' Repositories to ORM
+Rel(userRepo, prismaService, "uses")
+Rel(tenantRepo, prismaService, "uses")
+Rel(storeRepo, prismaService, "uses")
+Rel(pageRepo, prismaService, "uses")
+Rel(productRepo, prismaService, "uses")
+Rel(tagRepo, prismaService, "uses")
+Rel(subscriptionRepo, prismaService, "uses")
+Rel(analyticsRepo, prismaService, "uses")
+
+' ORM to External Systems
+Rel(prismaService, db, "SQL queries", "PostgreSQL")
+Rel(cacheAdapter, cache, "TCP", "Redis")
+Rel(storageAdapter, storage, "HTTPS (S3 API)", "S3")
+Rel(emailAdapter, email, "SMTP/API")
+Rel(dnsAdapter, dns, "DNS queries")
+Rel(paymentAdapter, payment, "REST API/Webhooks")
+
+' Configuration
+Rel(envConfig, appModule, "provides")
+Rel(prismaModule, appModule, "provides")
+Rel(prismaModule, prismaService, "exports")
 
 @enduml
-
 
 ' =========================================================
 ' C4 L3 - Frontend Components (Layered)

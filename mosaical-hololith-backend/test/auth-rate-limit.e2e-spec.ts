@@ -47,10 +47,6 @@ const getHeaderString = (value: unknown): string | undefined => {
   return undefined;
 };
 
-const RATE_LIMIT_DEFAULT: RateLimitOptions = {
-  max: 200,
-  timeWindow: '1 minute',
-};
 const RATE_LIMIT_AUTH_LOGIN: RateLimitOptions = {
   max: 10,
   timeWindow: '1 minute',
@@ -109,14 +105,14 @@ describe('Auth rate limit (e2e)', () => {
         : [routeOptions.method];
       const isPost = methods.includes('POST');
 
-    if (
-      isPost &&
-      (routeOptions.url === AUTH_LOGIN_PATH ||
-        routeOptions.url === AUTH_LOGIN_PATH.replace(`/${API_PREFIX}`, ''))
-    ) {
-      routeOptions.config = routeOptions.config ?? {};
-      routeOptions.config.rateLimit = RATE_LIMIT_AUTH_LOGIN;
-    }
+      if (
+        isPost &&
+        (routeOptions.url === AUTH_LOGIN_PATH ||
+          routeOptions.url === AUTH_LOGIN_PATH.replace(`/${API_PREFIX}`, ''))
+      ) {
+        routeOptions.config = routeOptions.config ?? {};
+        routeOptions.config.rateLimit = RATE_LIMIT_AUTH_LOGIN;
+      }
     });
 
     app.useGlobalFilters(new GlobalHttpExceptionFilter());
