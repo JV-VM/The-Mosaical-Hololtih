@@ -47,20 +47,20 @@ jobs:
 
       - name: Install dependencies
         working-directory: mosaical-hololith-backend
-        run: npm install
+        run: pnpm install
 
       - name: Run Prisma migrations
         working-directory: mosaical-hololith-backend
-        run: npx prisma migrate deploy
+        run: pnpx prisma migrate deploy
 
       - name: Lint
         working-directory: mosaical-hololith-backend
-        run: npm run lint
+        run: pnpm run lint
 
       - name: Unit tests
         working-directory: mosaical-hololith-backend
-        run: npm test
+        run: pnpm test
 
       - name: E2E tests
         working-directory: mosaical-hololith-backend
-        run: npm run test:e2e
+        run: pnpm run test:e2e --runInBand
