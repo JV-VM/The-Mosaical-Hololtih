@@ -1,0 +1,268 @@
+' =========================================================
+' The Mosaical Hololith - Use Case Diagram Pack (Readable)
+' Split by subsystem to avoid tiny unreadable diagrams.
+' =========================================================
+
+
+' ---------------------------------------------------------
+' USE CASE OVERVIEW (small)
+' ---------------------------------------------------------
+@startuml UseCase_Overview
+left to right direction
+skinparam packageStyle rectangle
+
+actor "Visitor" as Visitor
+actor "Customer\n(optional)" as Customer
+actor "Producer" as Producer
+actor "Tenant Admin" as TenantAdmin
+actor "Platform Admin" as PlatformAdmin
+
+rectangle "The Mosaical Hololith Platform (MVP)" {
+
+  package "Public Hub" {
+    usecase "Explore Stores/Products" as UC_Explore
+    usecase "View Storefront" as UC_ViewStore
+  }
+
+  package "Producer Dashboard" {
+    usecase "Create/Manage Store" as UC_ManageStore
+    usecase "Manage Catalog" as UC_ManageCatalog
+    usecase "Publish Store" as UC_Publish
+  }
+
+  package "Plans & Governance" {
+    usecase "Plan & Quota Enforcement" as UC_Quotas
+    usecase "Tag Policies" as UC_TagPolicies
+  }
+
+  package "Platform Admin" {
+    usecase "Moderate Stores" as UC_Moderate
+  }
+}
+
+Visitor --> UC_Explore
+Visitor --> UC_ViewStore
+
+Customer --> UC_Explore
+Customer --> UC_ViewStore
+
+Producer --> UC_ManageStore
+Producer --> UC_ManageCatalog
+Producer --> UC_Publish
+
+TenantAdmin --> UC_ManageStore
+TenantAdmin --> UC_Quotas
+
+PlatformAdmin --> UC_TagPolicies
+PlatformAdmin --> UC_Moderate
+
+@enduml
+
+
+' ---------------------------------------------------------
+' PUBLIC HUB USE CASES (slice)
+' ---------------------------------------------------------
+@startuml UseCase_PublicHub
+left to right direction
+skinparam packageStyle rectangle
+
+actor "Visitor" as Visitor
+actor "Customer\n(optional)" as Customer
+
+rectangle "Public Hub" {
+
+  package "Discovery" {
+    usecase "Browse Home" as UC_Home
+    usecase "Explore (Search/Filter)" as UC_Explore
+    usecase "View Tag Page" as UC_TagPage
+    usecase "View Storefront" as UC_Storefront
+    usecase "View Product/Service" as UC_Product
+  }
+
+  package "Support & Legal" {
+    usecase "Open Support" as UC_Support
+    usecase "View Terms/Privacy" as UC_Legal
+  }
+
+  package "Analytics (MVP)" {
+    usecase "Track View/Search Events" as UC_Track
+  }
+}
+
+Visitor --> UC_Home
+Visitor --> UC_Explore
+Visitor --> UC_TagPage
+Visitor --> UC_Storefront
+Visitor --> UC_Product
+Visitor --> UC_Support
+Visitor --> UC_Legal
+
+Customer --> UC_Home
+Customer --> UC_Explore
+Customer --> UC_TagPage
+Customer --> UC_Storefront
+Customer --> UC_Product
+
+UC_Home .> UC_Track : <<include>>
+UC_Explore .> UC_Track : <<include>>
+UC_TagPage .> UC_Track : <<include>>
+UC_Storefront .> UC_Track : <<include>>
+UC_Product .> UC_Track : <<include>>
+
+@enduml
+
+
+' ---------------------------------------------------------
+' PRODUCER DASHBOARD USE CASES (slice)
+' ---------------------------------------------------------
+@startuml UseCase_ProducerDashboard
+left to right direction
+skinparam packageStyle rectangle
+
+actor "Producer" as Producer
+actor "Tenant Admin" as TenantAdmin
+
+rectangle "Producer Dashboard" {
+
+  package "Tenant" {
+    usecase "Create Tenant (Organization)" as UC_TenantCreate
+    usecase "Manage Team Members" as UC_Team
+  }
+
+  package "Store Builder" {
+    usecase "Create Store" as UC_StoreCreate
+    usecase "Edit Store Settings" as UC_StoreSettings
+    usecase "Pick/Change Theme" as UC_Theme
+    usecase "Manage Pages" as UC_Pages
+    usecase "Manage Domain/Subdomain" as UC_Domain
+    usecase "Publish/Unpublish Store" as UC_Publish
+  }
+
+  package "Catalog" {
+    usecase "Manage Catalog (CRUD)" as UC_Catalog
+    usecase "Upload Media Assets" as UC_Media
+    usecase "Assign Tags (Plan-limited)" as UC_Tags
+  }
+
+  package "Insights" {
+    usecase "View Basic Analytics" as UC_Analytics
+    usecase "View Quotas / Usage" as UC_Usage
+  }
+
+  package "Billing" {
+    usecase "View Current Plan" as UC_ViewPlan
+    usecase "Upgrade/Downgrade Plan (stub)" as UC_ChangePlan
+  }
+}
+
+Producer --> UC_TenantCreate
+Producer --> UC_StoreCreate
+Producer --> UC_StoreSettings
+Producer --> UC_Theme
+Producer --> UC_Pages
+Producer --> UC_Domain
+Producer --> UC_Publish
+Producer --> UC_Catalog
+Producer --> UC_Media
+Producer --> UC_Tags
+Producer --> UC_Analytics
+Producer --> UC_Usage
+Producer --> UC_ViewPlan
+
+TenantAdmin --> UC_Team
+TenantAdmin --> UC_ViewPlan
+TenantAdmin --> UC_ChangePlan
+TenantAdmin --> UC_Usage
+TenantAdmin --> UC_Domain
+TenantAdmin --> UC_Publish
+
+UC_Catalog .> UC_Media : <<include>>
+UC_Publish ..> UC_StoreCreate : <<extend>>
+UC_ChangePlan ..> UC_ViewPlan : <<extend>>
+
+@enduml
+
+
+' ---------------------------------------------------------
+' PLATFORM ADMIN USE CASES (slice)
+' ---------------------------------------------------------
+@startuml UseCase_PlatformAdmin
+left to right direction
+skinparam packageStyle rectangle
+
+actor "Platform Admin" as PlatformAdmin
+
+rectangle "Platform Admin" {
+
+  package "Governance" {
+    usecase "Manage Tags" as UC_AdminTags
+    usecase "Set Tag Tiers & Policies" as UC_TagPolicies
+  }
+
+  package "Moderation" {
+    usecase "Search/Inspect Stores" as UC_AdminStores
+    usecase "Suspend/Unpublish Store" as UC_Suspend
+    usecase "View Reports" as UC_Reports
+    usecase "Resolve Reports" as UC_Resolve
+  }
+}
+
+PlatformAdmin --> UC_AdminTags
+PlatformAdmin --> UC_TagPolicies
+PlatformAdmin --> UC_AdminStores
+PlatformAdmin --> UC_Suspend
+PlatformAdmin --> UC_Reports
+PlatformAdmin --> UC_Resolve
+
+UC_Suspend .> UC_AdminStores : <<include>>
+UC_Resolve .> UC_Reports : <<include>>
+
+@enduml
+
+
+' ---------------------------------------------------------
+' SHARED PLATFORM USE CASES (Auth + Quotas + Analytics) (slice)
+' ---------------------------------------------------------
+@startuml UseCase_SharedPlatform
+left to right direction
+skinparam packageStyle rectangle
+
+actor "Customer\n(optional)" as Customer
+actor "Producer" as Producer
+actor "Tenant Admin" as TenantAdmin
+actor "Platform Admin" as PlatformAdmin
+
+rectangle "Shared Platform Services" {
+
+  package "Authentication" {
+    usecase "Register" as UC_Register
+    usecase "Login" as UC_Login
+    usecase "Reset Password" as UC_Reset
+  }
+
+  package "Plans & Quotas" {
+    usecase "Enforce Quotas & Feature Gates" as UC_Enforce
+    usecase "Compute Usage Metrics" as UC_Usage
+  }
+
+  package "Analytics" {
+    usecase "Ingest Analytics Events" as UC_Ingest
+    usecase "Aggregate Daily Metrics" as UC_Aggregate
+  }
+}
+
+Customer --> UC_Register
+Customer --> UC_Login
+Customer --> UC_Reset
+
+Producer --> UC_Register
+Producer --> UC_Login
+Producer --> UC_Reset
+
+TenantAdmin --> UC_Login
+PlatformAdmin --> UC_Login
+
+UC_Usage .> UC_Enforce : <<include>>
+UC_Aggregate .> UC_Ingest : <<include>>
+
+@enduml

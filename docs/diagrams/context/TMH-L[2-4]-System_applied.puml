@@ -1,0 +1,600 @@
+' =========================================================
+' The Mosaical Hololith - C4 Pack (L1 + L2 + L3 Backend + L3 Frontend)
+' =========================================================
+
+' ---------- Shared includes (C4) ----------
+' (Each diagram below includes what it needs, but keeping
+' this header comment for clarity.)
+' NOTE: Some renderers require includes per @startuml block.
+
+' =========================================================
+' C4 L1 - Containers (reference frame for L3)
+' =========================================================
+
+@startuml The_Mosaical_Hololith_C4_L2_Containers
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+title The Mosaical Hololith - Containers (C4 L2)
+
+Person(visitor, "Visitor", "Explores hub and storefronts.")
+Person(producer, "Producer", "Manages stores & catalog.")
+Person(tenantAdmin, "Tenant Admin", "Plan/billing, domains, team.")
+Person(platformAdmin, "Platform Admin", "Tags/policies, moderation.")
+
+System_Boundary(se, "The Mosaical Hololith Platform") {
+  Container(webHub, "Public Hub Web App", "Angular or React", "Landing, Explore, Tag pages, Storefront viewing.")
+  Container(dashboard, "Producer Dashboard Web App", "Angular (recommended)", "Tenant/store management, pages, catalog, analytics, billing UI.")
+  Container(admin, "Platform Admin Web App", "Angular/React", "Internal admin: tags, stores, reports, moderation.")
+
+  Container(api, "Backend API", "NestJS", "Auth, tenancy, stores, pages, catalog, tags, discovery, plans/quotas, analytics.")
+  ContainerDb(db, "Primary Database", "PostgreSQL", "Tenants, stores, pages, products, tags, subscriptions, analytics aggregates.")
+  Container(cache, "Cache", "Redis", "Rate limiting, sessions (optional), hot discovery queries (optional).")
+  Container(storage, "Object Storage", "S3-compatible", "Product/store media assets.")
+}
+
+System_Ext(email, "Email Provider", "Transactional email (verification, invites).")
+System_Ext(payment, "Payment Provider (Phase 2)", "Subscriptions & payments.")
+System_Ext(dns, "DNS Provider", "Domain verification via DNS records.")
+
+Rel(visitor, webHub, "Browse/Explore", "HTTPS")
+Rel(producer, dashboard, "Manage stores & products", "HTTPS")
+Rel(tenantAdmin, dashboard, "Billing/domains/team", "HTTPS")
+Rel(platformAdmin, admin, "Moderation & governance", "HTTPS")
+
+Rel(webHub, api, "Reads public store/catalog/discovery", "HTTPS/JSON")
+Rel(dashboard, api, "CRUD + management operations", "HTTPS/JSON")
+Rel(admin, api, "Admin operations", "HTTPS/JSON")
+
+Rel(api, db, "Reads/Writes", "SQL")
+Rel(api, cache, "Caching / Rate limiting", "TCP")
+Rel(api, storage, "Upload/serve media", "HTTPS (S3 API)")
+Rel(api, email, "Send emails", "SMTP/API")
+Rel(api, dns, "Domain verification checks", "DNS")
+Rel(api, payment, "Create subscriptions (later)", "API/Webhooks")
+
+@enduml
+
+
+' =========================================================
+' The Mosaical Hololith - Backend C4 L3 (Readable Pack)
+' Split by bounded context to avoid "too small" diagrams.
+' =========================================================
+
+' ---------------------------------------------------------
+' L3 BACKEND OVERVIEW (small, high-level components only)
+' ---------------------------------------------------------
+@startuml Backend_L3_Overview
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title Backend API - L3 Overview (Readable)
+
+Container(api, "Backend API", "NestJS", "Modular monolith, tenant-isolated.")
+ContainerDb(db, "PostgreSQL", "Database", "Primary store")
+
+Container_Boundary(b, "Backend API (high-level modules)") {
+  Component(AuthModule, "Auth Module", "NestJS Module", "Auth, sessions, JWT.")
+  Component(TenancyModule, "Tenancy Module", "NestJS Module", "Tenants, memberships, roles.")
+  Component(StoresModule, "Stores/Pages Module", "NestJS Module", "Stores, pages, publish.")
+  Component(CatalogModule, "Catalog/Media Module", "NestJS Module", "Products/services, uploads.")
+  Component(TagsDiscoveryModule, "Tags/Discovery Module", "NestJS Module", "Taxonomy, explore/search.")
+  Component(PlansModule, "Plans/Quotas Module", "NestJS Module", "Subscriptions, usage, gates.")
+  Component(AnalyticsModule, "Analytics Module", "NestJS Module", "Events, aggregates.")
+  Component(AdminModule, "Admin/Moderation Module", "NestJS Module", "Policies, suspend, reports.")
+}
+
+Rel(AuthModule, db, "reads/writes", "SQL")
+Rel(TenancyModule, db, "reads/writes", "SQL")
+Rel(StoresModule, db, "reads/writes", "SQL")
+Rel(CatalogModule, db, "reads/writes", "SQL")
+Rel(TagsDiscoveryModule, db, "reads/writes", "SQL")
+Rel(PlansModule, db, "reads/writes", "SQL")
+Rel(AnalyticsModule, db, "reads/writes", "SQL")
+Rel(AdminModule, db, "reads/writes", "SQL")
+
+@enduml
+
+
+' ---------------------------------------------------------
+' L3 AUTH & IDENTITY (slice)
+' ---------------------------------------------------------
+@startuml Backend_L3_Auth
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title Backend API - L3 Auth & Identity
+
+Container(api, "Backend API", "NestJS", "Auth slice")
+ContainerDb(db, "PostgreSQL", "Database", "Users, sessions")
+System_Ext(email, "Email Provider", "SMTP/API")
+
+Container_Boundary(b, "Auth/Identity") {
+  Boundary(apiLayer, "API Layer") {
+    Component(AuthController, "AuthController", "Controller", "Register/login/refresh/reset.")
+    Component(AuthGuard, "AuthGuard", "Guard", "Protect endpoints.")
+  }
+  Boundary(appLayer, "Application") {
+    Component(AuthService, "AuthService", "Service", "Auth use cases.")
+    Component(TokenService, "TokenService", "Service", "JWT issue/verify.")
+  }
+  Boundary(infra, "Infrastructure") {
+    Component(UserRepo, "UserRepository", "Repo", "Users persistence.")
+    Component(EmailAdapter, "EmailAdapter", "Adapter", "Verification/reset emails.")
+  }
+}
+
+Rel(AuthController, AuthService, "calls")
+Rel(AuthGuard, TokenService, "verifies")
+Rel(AuthService, UserRepo, "reads/writes")
+Rel(AuthService, EmailAdapter, "sends")
+Rel(UserRepo, db, "SQL")
+Rel(EmailAdapter, email, "SMTP/API")
+
+@enduml
+
+
+' ---------------------------------------------------------
+' L3 TENANCY (slice)
+' ---------------------------------------------------------
+@startuml Backend_L3_Tenancy
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title Backend API - L3 Tenancy
+
+Container(api, "Backend API", "NestJS", "Tenancy slice")
+ContainerDb(db, "PostgreSQL", "Database", "Tenants, memberships")
+
+Container_Boundary(b, "Tenancy") {
+  Boundary(apiLayer, "API Layer") {
+    Component(TenantController, "TenantController", "Controller", "Tenants + members.")
+    Component(TenantGuard, "TenantGuard", "Guard", "Tenant isolation checks.")
+  }
+  Boundary(appLayer, "Application") {
+    Component(TenantService, "TenantService", "Service", "Create tenant, invite, roles.")
+  }
+  Boundary(infra, "Infrastructure") {
+    Component(TenantRepo, "TenantRepository", "Repo", "Tenants/memberships persistence.")
+  }
+}
+
+Rel(TenantController, TenantService, "calls")
+Rel(TenantGuard, TenantService, "resolves access")
+Rel(TenantService, TenantRepo, "reads/writes")
+Rel(TenantRepo, db, "SQL")
+
+@enduml
+
+
+' ---------------------------------------------------------
+' L3 STORES & PAGES (slice)
+' ---------------------------------------------------------
+@startuml Backend_L3_StoresPages
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title Backend API - L3 Stores & Pages
+
+Container(api, "Backend API", "NestJS", "Stores slice")
+ContainerDb(db, "PostgreSQL", "Database", "Stores, pages")
+System_Ext(dns, "DNS Provider", "DNS")
+
+Container_Boundary(b, "Stores & Pages") {
+  Boundary(apiLayer, "API Layer") {
+    Component(StoreController, "StoreController", "Controller", "Store CRUD + publish.")
+    Component(PageController, "PageController", "Controller", "Pages CRUD.")
+    Component(QuotaGuard, "QuotaGuard", "Guard", "Plan gates for domain/publish.")
+  }
+  Boundary(appLayer, "Application") {
+    Component(StoreService, "StoreService", "Service", "Create/update/publish store.")
+    Component(PageService, "PageService", "Service", "Create/update pages.")
+    Component(DomainService, "DomainService", "Service", "Domain verify + status.")
+  }
+  Boundary(infra, "Infrastructure") {
+    Component(StoreRepo, "StoreRepository", "Repo", "Stores persistence.")
+    Component(PageRepo, "PageRepository", "Repo", "Pages persistence.")
+    Component(DNSAdapter, "DNSAdapter", "Adapter", "Domain verification checks.")
+  }
+}
+
+Rel(StoreController, StoreService, "calls")
+Rel(PageController, PageService, "calls")
+Rel(QuotaGuard, StoreService, "checks on write")
+Rel(StoreService, StoreRepo, "reads/writes")
+Rel(PageService, PageRepo, "reads/writes")
+Rel(DomainService, DNSAdapter, "verifies")
+Rel(StoreRepo, db, "SQL")
+Rel(PageRepo, db, "SQL")
+Rel(DNSAdapter, dns, "DNS")
+
+@enduml
+
+
+' ---------------------------------------------------------
+' L3 CATALOG & MEDIA (slice)
+' ---------------------------------------------------------
+@startuml Backend_L3_CatalogMedia
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title Backend API - L3 Catalog & Media
+
+Container(api, "Backend API", "NestJS", "Catalog slice")
+ContainerDb(db, "PostgreSQL", "Database", "Products, media refs")
+System_Ext(storage, "Object Storage", "S3 API")
+
+Container_Boundary(b, "Catalog & Media") {
+  Boundary(apiLayer, "API Layer") {
+    Component(CatalogController, "CatalogController", "Controller", "Product/service CRUD.")
+    Component(MediaController, "MediaController", "Controller", "Upload endpoints (optional).")
+    Component(QuotaGuard, "QuotaGuard", "Guard", "Product count + storage limits.")
+  }
+  Boundary(appLayer, "Application") {
+    Component(CatalogService, "CatalogService", "Service", "Create/update/publish products.")
+    Component(MediaService, "MediaService", "Service", "Validate + upload assets.")
+  }
+  Boundary(infra, "Infrastructure") {
+    Component(ProductRepo, "ProductRepository", "Repo", "Catalog persistence.")
+    Component(MediaRepo, "MediaRepository", "Repo", "Media metadata persistence.")
+    Component(StorageAdapter, "StorageAdapter", "Adapter", "Uploads + signed URLs.")
+  }
+}
+
+Rel(CatalogController, CatalogService, "calls")
+Rel(MediaController, MediaService, "calls")
+Rel(QuotaGuard, CatalogService, "checks on write")
+Rel(CatalogService, ProductRepo, "reads/writes")
+Rel(MediaService, MediaRepo, "reads/writes")
+Rel(MediaService, StorageAdapter, "uploads")
+Rel(ProductRepo, db, "SQL")
+Rel(MediaRepo, db, "SQL")
+Rel(StorageAdapter, storage, "HTTPS (S3 API)")
+
+@enduml
+
+
+' ---------------------------------------------------------
+' L3 TAGS & DISCOVERY (slice)
+' ---------------------------------------------------------
+@startuml Backend_L3_TagsDiscovery
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title Backend API - L3 Tags & Discovery
+
+Container(api, "Backend API", "NestJS", "Discovery slice")
+ContainerDb(db, "PostgreSQL", "Database", "Tags, indexes")
+
+Container_Boundary(b, "Tags & Discovery") {
+  Boundary(apiLayer, "API Layer") {
+    Component(TagController, "TagController", "Controller", "Tags list + assignment.")
+    Component(DiscoveryController, "DiscoveryController", "Controller", "Explore/search.")
+    Component(QuotaGuard, "QuotaGuard", "Guard", "Plan tag tiers gates.")
+  }
+  Boundary(appLayer, "Application") {
+    Component(TaggingService, "TaggingService", "Service", "Assign tags w/ policy checks.")
+    Component(DiscoveryService, "DiscoveryService", "Service", "Search/filter read models.")
+  }
+  Boundary(infra, "Infrastructure") {
+    Component(TagRepo, "TagRepository", "Repo", "Tags persistence.")
+    Component(DiscoveryReadRepo, "DiscoveryReadRepository", "Read Repo", "Explore queries / indexes.")
+  }
+}
+
+Rel(TagController, TaggingService, "calls")
+Rel(DiscoveryController, DiscoveryService, "calls")
+Rel(QuotaGuard, TaggingService, "checks")
+Rel(TaggingService, TagRepo, "reads/writes")
+Rel(DiscoveryService, DiscoveryReadRepo, "reads")
+Rel(TagRepo, db, "SQL")
+Rel(DiscoveryReadRepo, db, "SQL")
+
+@enduml
+
+
+' ---------------------------------------------------------
+' L3 PLANS/QUOTAS + ANALYTICS + ADMIN (slice)
+' (Grouped because they are cross-cutting)
+' ---------------------------------------------------------
+@startuml Backend_L3_PlansAnalyticsAdmin
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title Backend API - L3 Plans/Quotas + Analytics + Admin
+
+Container(api, "Backend API", "NestJS", "Cross-cutting slice")
+ContainerDb(db, "PostgreSQL", "Database", "Plans, usage, analytics")
+System_Ext(payment, "Payment Provider (Phase 2)", "API/Webhooks")
+
+Container_Boundary(b, "Plans/Analytics/Admin") {
+  Boundary(apiLayer, "API Layer") {
+    Component(BillingController, "BillingController", "Controller", "Plan/usage/upgrade stub.")
+    Component(AnalyticsController, "AnalyticsController", "Controller", "Ingest view/search events.")
+    Component(AdminController, "AdminController", "Controller", "Moderation + tag governance.")
+  }
+
+  Boundary(appLayer, "Application") {
+    Component(PlanService, "PlanService", "Service", "Resolve plan, quotas, usage.")
+    Component(QuotaPolicyEngine, "QuotaPolicyEngine", "Service", "Central feature gates + limits.")
+    Component(AnalyticsService, "AnalyticsService", "Service", "Ingest + daily aggregates.")
+    Component(ModerationService, "ModerationService", "Service", "Suspend/unpublish + reports.")
+  }
+
+  Boundary(infra, "Infrastructure") {
+    Component(SubscriptionRepo, "SubscriptionRepository", "Repo", "Plans/subscriptions/usage.")
+    Component(AnalyticsRepo, "AnalyticsRepository", "Repo", "Events + aggregates persistence.")
+    Component(PaymentAdapter, "PaymentAdapter", "Adapter", "Billing integration (Phase 2).")
+  }
+}
+
+Rel(BillingController, PlanService, "calls")
+Rel(AnalyticsController, AnalyticsService, "calls")
+Rel(AdminController, ModerationService, "calls")
+
+Rel(PlanService, QuotaPolicyEngine, "uses")
+Rel(QuotaPolicyEngine, SubscriptionRepo, "reads")
+Rel(PlanService, SubscriptionRepo, "reads/writes")
+Rel(AnalyticsService, AnalyticsRepo, "reads/writes")
+Rel(ModerationService, SubscriptionRepo, "reads")
+Rel(PlanService, PaymentAdapter, "billing (phase 2)")
+
+Rel(SubscriptionRepo, db, "SQL")
+Rel(AnalyticsRepo, db, "SQL")
+Rel(PaymentAdapter, payment, "API/Webhooks")
+
+@enduml
+
+
+' =========================================================
+' SaasEcommerce - Frontend C4 L3 (Readable Pack)
+' Split by app to avoid tiny unreadable diagrams.
+' =========================================================
+
+
+' ---------------------------------------------------------
+' L3 FRONTEND OVERVIEW (small)
+' ---------------------------------------------------------
+@startuml Frontend_L3_Overview
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title Frontend - L3 Overview (Readable)
+
+Container(webHub, "Public Hub Web App", "Angular or React", "Discovery + storefront viewing.")
+Container(dashboard, "Producer Dashboard Web App", "Angular", "Store builder + catalog + analytics.")
+Container(admin, "Platform Admin Web App", "Angular/React", "Governance + moderation.")
+Container(api, "Backend API", "NestJS", "JSON API")
+
+Rel(webHub, api, "calls", "HTTPS/JSON")
+Rel(dashboard, api, "calls", "HTTPS/JSON")
+Rel(admin, api, "calls", "HTTPS/JSON")
+
+Container_Boundary(front, "Frontend Apps") {
+  Component(HubApp, "Hub App", "SPA/SSR", "Public routes: home/explore/tags/store/product.")
+  Component(DashboardApp, "Dashboard App", "SPA", "Producer routes: stores/pages/catalog/billing.")
+  Component(AdminApp, "Admin App", "SPA", "Admin routes: tags/stores/reports/moderation.")
+  Component(SharedUI, "Shared UI Kit", "Library", "Buttons, forms, tables, cards, layout.")
+  Component(SharedCore, "Shared Core", "Library", "HTTP client, auth/session, error mapping.")
+}
+
+Rel(HubApp, SharedUI, "uses")
+Rel(DashboardApp, SharedUI, "uses")
+Rel(AdminApp, SharedUI, "uses")
+
+Rel(HubApp, SharedCore, "uses")
+Rel(DashboardApp, SharedCore, "uses")
+Rel(AdminApp, SharedCore, "uses")
+
+@enduml
+
+
+' ---------------------------------------------------------
+' L3 PUBLIC HUB (slice)
+' ---------------------------------------------------------
+@startuml Frontend_L3_PublicHub
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title Frontend - L3 Public Hub (Layered)
+
+Container(webHub, "Public Hub Web App", "Angular or React", "Public discovery + storefront viewing.")
+Container(api, "Backend API", "NestJS", "JSON API")
+
+Container_Boundary(hub, "Public Hub") {
+
+  Boundary(ui, "UI Layer") {
+    Component(Router, "Hub Router", "Routing", "Routes: /, /explore, /tags/:slug, /stores/:slug, /products/:slug")
+    Component(HomePage, "HomePage", "UI", "Featured tags + recent stores/products.")
+    Component(ExplorePage, "ExplorePage", "UI", "Search/filter/sort + pagination.")
+    Component(TagPage, "TagPage", "UI", "Tag landing page.")
+    Component(StorefrontPage, "StorefrontPage", "UI", "Store pages + catalog list.")
+    Component(ProductPage, "ProductPage", "UI", "Product/service detail.")
+    Component(HubWidgets, "Hub Widgets", "UI", "Cards, chips, filters, pagination, header/footer.")
+  }
+
+  Boundary(state, "State Layer") {
+    Component(ExploreState, "Explore State", "State", "filters, query, pagination, results.")
+    Component(StorefrontState, "Storefront State", "State", "current store + products.")
+  }
+
+  Boundary(services, "Service Layer") {
+    Component(DiscoveryApi, "Discovery API Client", "Service", "GET /explore, GET /tags/:slug")
+    Component(StorefrontApi, "Storefront API Client", "Service", "GET /stores/:slug, GET products")
+    Component(AnalyticsApi, "Analytics Client", "Service", "POST view/search/tag-click events")
+  }
+
+  Boundary(infra, "Infrastructure") {
+    Component(HttpClient, "HTTP Client", "Infra", "base URL, retries, error mapping")
+    Component(LocalCache, "Local Cache", "Infra", "optional caching of searches")
+  }
+}
+
+Rel(HomePage, DiscoveryApi, "loads featured")
+Rel(ExplorePage, ExploreState, "reads/writes")
+Rel(ExploreState, DiscoveryApi, "calls")
+Rel(TagPage, DiscoveryApi, "calls")
+Rel(StorefrontPage, StorefrontState, "reads/writes")
+Rel(StorefrontState, StorefrontApi, "calls")
+Rel(ProductPage, StorefrontApi, "calls")
+
+Rel(ExplorePage, AnalyticsApi, "tracks")
+Rel(StorefrontPage, AnalyticsApi, "tracks")
+Rel(ProductPage, AnalyticsApi, "tracks")
+Rel(TagPage, AnalyticsApi, "tracks")
+
+Rel(DiscoveryApi, HttpClient, "uses")
+Rel(StorefrontApi, HttpClient, "uses")
+Rel(AnalyticsApi, HttpClient, "uses")
+
+Rel(HttpClient, api, "HTTPS/JSON")
+
+@enduml
+
+
+' ---------------------------------------------------------
+' L3 PRODUCER DASHBOARD (slice)
+' ---------------------------------------------------------
+@startuml Frontend_L3_ProducerDashboard
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title Frontend - L3 Producer Dashboard (Layered)
+
+Container(dashboard, "Producer Dashboard Web App", "Angular", "Producer-facing management UI.")
+Container(api, "Backend API", "NestJS", "JSON API")
+
+Container_Boundary(dash, "Producer Dashboard") {
+
+  Boundary(ui, "UI Layer") {
+    Component(DashRouter, "Dashboard Router", "Routing", "Routes: /dashboard/*")
+    Component(AuthPages, "Auth Pages", "UI", "login/register/reset")
+    Component(Overview, "Overview", "UI", "store status + usage")
+    Component(StoreSettings, "Store Settings", "UI", "settings + publish/unpublish")
+    Component(Theme, "Theme", "UI", "theme selection (MVP)")
+    Component(PagesEditor, "Pages Editor", "UI", "basic pages CRUD")
+    Component(Catalog, "Catalog", "UI", "products/services CRUD")
+    Component(Tags, "Tags", "UI", "assign tags + warnings")
+    Component(Domain, "Domain", "UI", "subdomain + custom domain verify")
+    Component(Analytics, "Analytics", "UI", "basic metrics")
+    Component(Billing, "Billing", "UI", "plan + quotas + upgrade stub")
+    Component(Team, "Team", "UI", "members + invites")
+    Component(DashWidgets, "Dashboard Widgets", "UI", "tables, forms, quota meter, modals")
+  }
+
+  Boundary(state, "State Layer") {
+    Component(SessionState, "Session State", "State", "token + active tenant/store")
+    Component(StoreState, "Store State", "State", "current store, publish status")
+    Component(UsageState, "Usage State", "State", "quotas + usage counters")
+  }
+
+  Boundary(services, "Service Layer") {
+    Component(AuthApi, "Auth API Client", "Service", "register/login/refresh")
+    Component(TenantApi, "Tenant API Client", "Service", "tenants/memberships/invites")
+    Component(StoreApi, "Store API Client", "Service", "store CRUD/publish")
+    Component(PageApi, "Page API Client", "Service", "pages CRUD")
+    Component(CatalogApi, "Catalog API Client", "Service", "products/services CRUD")
+    Component(TagApi, "Tag API Client", "Service", "tags list + assignment")
+    Component(DomainApi, "Domain API Client", "Service", "domain verify")
+    Component(PlanApi, "Plan API Client", "Service", "plan + usage + upgrade stub")
+    Component(MediaApi, "Media API Client", "Service", "uploads")
+  }
+
+  Boundary(infra, "Infrastructure") {
+    Component(HttpClient, "HTTP Client", "Infra", "auth + tenant interceptors")
+    Component(RouteGuards, "Route Guards", "Infra", "auth guard + tenant guard")
+    Component(ErrorMapper, "Error Mapper", "Infra", "map API errors to UI")
+  }
+}
+
+Rel(RouteGuards, DashRouter, "protects routes")
+Rel(AuthPages, AuthApi, "calls")
+
+Rel(Overview, StoreState, "reads")
+Rel(Overview, UsageState, "reads")
+Rel(StoreSettings, StoreApi, "calls")
+Rel(PagesEditor, PageApi, "calls")
+Rel(Catalog, CatalogApi, "calls")
+Rel(Tags, TagApi, "calls")
+Rel(Domain, DomainApi, "calls")
+Rel(Analytics, PlanApi, "reads metrics (or analytics endpoints)")
+Rel(Billing, PlanApi, "calls")
+Rel(Team, TenantApi, "calls")
+
+Rel(SessionState, HttpClient, "provides token/tenant context")
+Rel(StoreState, StoreApi, "syncs")
+Rel(UsageState, PlanApi, "syncs")
+
+Rel(AuthApi, HttpClient, "uses")
+Rel(TenantApi, HttpClient, "uses")
+Rel(StoreApi, HttpClient, "uses")
+Rel(PageApi, HttpClient, "uses")
+Rel(CatalogApi, HttpClient, "uses")
+Rel(TagApi, HttpClient, "uses")
+Rel(DomainApi, HttpClient, "uses")
+Rel(PlanApi, HttpClient, "uses")
+Rel(MediaApi, HttpClient, "uses")
+
+Rel(HttpClient, api, "HTTPS/JSON")
+
+@enduml
+
+
+' ---------------------------------------------------------
+' L3 PLATFORM ADMIN (slice)
+' ---------------------------------------------------------
+@startuml Frontend_L3_PlatformAdmin
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title Frontend - L3 Platform Admin (Layered)
+
+Container(admin, "Platform Admin Web App", "Angular/React", "Internal admin UI.")
+Container(api, "Backend API", "NestJS", "JSON API")
+
+Container_Boundary(adm, "Platform Admin") {
+
+  Boundary(ui, "UI Layer") {
+    Component(AdminRouter, "Admin Router", "Routing", "Routes: /admin/*")
+    Component(TagsPolicies, "Tags & Policies", "UI", "create tags, tiers, policy flags")
+    Component(Stores, "Stores", "UI", "search/inspect stores")
+    Component(Reports, "Reports", "UI", "view/resolve reports")
+    Component(Moderation, "Moderation Actions", "UI", "suspend/unpublish store")
+  }
+
+  Boundary(state, "State Layer") {
+    Component(AdminSession, "Admin Session State", "State", "admin auth context")
+  }
+
+  Boundary(services, "Service Layer") {
+    Component(AdminApi, "Admin API Client", "Service", "admin endpoints")
+    Component(TagGovernanceApi, "Tag Governance Client", "Service", "tags/policies endpoints")
+    Component(ModerationApi, "Moderation Client", "Service", "suspend/unpublish endpoints")
+  }
+
+  Boundary(infra, "Infrastructure") {
+    Component(HttpClient, "HTTP Client", "Infra", "admin auth interceptor")
+    Component(RouteGuards, "Admin Guards", "Infra", "admin-only routes")
+  }
+}
+
+Rel(RouteGuards, AdminRouter, "protects routes")
+Rel(TagsPolicies, TagGovernanceApi, "calls")
+Rel(Stores, AdminApi, "calls")
+Rel(Reports, AdminApi, "calls")
+Rel(Moderation, ModerationApi, "calls")
+
+Rel(AdminApi, HttpClient, "uses")
+Rel(TagGovernanceApi, HttpClient, "uses")
+Rel(ModerationApi, HttpClient, "uses")
+Rel(HttpClient, api, "HTTPS/JSON")
+
+@enduml
+
+
+' ---------------------------------------------------------
+' OPTIONAL: Shared UI + Shared Core (slice)
+' ---------------------------------------------------------
+@startuml Frontend_L3_SharedLibraries
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title Frontend - L3 Shared Libraries (UI Kit + Core)
+
+Container(frontend, "Frontend Monorepo", "Workspace", "Shared libraries used by Hub/Dashboard/Admin")
+Container(api, "Backend API", "NestJS", "JSON API")
+
+Container_Boundary(shared, "Shared Libraries") {
+
+  Boundary(uiKit, "Shared UI Kit") {
+    Component(DesignTokens, "Design Tokens", "UI", "colors, spacing, typography")
+    Component(FormKit, "Form Components", "UI", "inputs, validation UI")
+    Component(TableKit, "Table Components", "UI", "tables, pagination")
+    Component(LayoutKit, "Layout Components", "UI", "nav, shells, responsive layout")
+  }
+
+  Boundary(core, "Shared Core") {
+    Component(HttpCore, "HTTP Core", "Core", "base client + interceptors")
+    Component(AuthCore, "Auth Core", "Core", "session storage + token helpers")
+    Component(ErrorCore, "Error Handling", "Core", "error normalization + alerts")
+    Component(ConfigCore, "Config", "Core", "env, base URLs")
+  }
+}
+
+Rel(HttpCore, api, "calls", "HTTPS/JSON")
+
+@enduml
