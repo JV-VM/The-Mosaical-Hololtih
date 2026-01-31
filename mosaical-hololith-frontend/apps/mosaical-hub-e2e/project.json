@@ -1,0 +1,9 @@
+{
+  "name": "mosaical-hub-e2e",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "mosaical-hub-e2e/src",
+  "implicitDependencies": ["mosaical-hub"],
+  "// targets": "to see all targets run: nx show project mosaical-hub-e2e --web",
+  "targets": {}
+}

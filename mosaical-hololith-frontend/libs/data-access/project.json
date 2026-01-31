@@ -1,0 +1,21 @@
+{
+  "name": "data-access",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "data-access/src",
+  "prefix": "lib",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "test": {
+      "executor": "@nx/jest:jest",
+      "outputs": ["{workspaceRoot}/coverage/{projectRoot}"],
+      "options": {
+        "jestConfig": "data-access/jest.config.cts",
+        "tsConfig": "data-access/tsconfig.spec.json"
+      }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint"
+    }
+  }
+}
