@@ -23,7 +23,8 @@ type RequestLike = {
 type ResponseLike = {
   code?: (statusCode: number) => ResponseLike;
   status?: (statusCode: number) => ResponseLike;
-  send: (body: Record<string, unknown>) => void;
+  send?: (body: Record<string, unknown>) => void;
+  json?: (body: Record<string, unknown>) => void;
 };
 
 function createHost(
@@ -73,12 +74,13 @@ describe('GlobalHttpExceptionFilter', () => {
     }
   });
 
-  it('uses the HttpException status and response payload', () => {
+  it('uses the HttpException status and response payload for Express-like response', () => {
     const response: ResponseLike = {
-      code: jest.fn(),
+      status: jest.fn(),
+      json: jest.fn(),
       send: jest.fn(),
     };
-    (response.code as jest.Mock).mockImplementation(() => response);
+    (response.status as jest.Mock).mockImplementation(() => response);
 
     const request: RequestLike = {
       url: '/bad-request',
@@ -88,13 +90,38 @@ describe('GlobalHttpExceptionFilter', () => {
     const host = createHost(request, response);
     filter.catch(new HttpException({ message: 'bad input' }, 400), host);
 
-    expect(response.code).toHaveBeenCalledWith(400);
-    const body = getSentBody(response.send as jest.Mock);
+    expect(response.status).toHaveBeenCalledWith(400);
+    const body = getSentBody(response.json as jest.Mock);
     expect(body).toMatchObject({
       statusCode: 400,
       path: '/bad-request',
       message: 'bad input',
       requestId: 'req-1',
+    });
+  });
+
+  it('uses the HttpException status and response payload for Fastify-like reply', () => {
+    const response: ResponseLike = {
+      code: jest.fn(),
+      send: jest.fn(),
+    };
+    (response.code as jest.Mock).mockImplementation(() => response);
+
+    const request: RequestLike = {
+      url: '/bad-request-fastify',
+      headers: { 'x-request-id': 'req-1-fastify' },
+    };
+
+    const host = createHost(request, response);
+    filter.catch(new HttpException({ message: 'bad input' }, 400), host);
+
+    expect(response.code).toHaveBeenCalledWith(400);
+    const body = getSentBody(response.send as jest.Mock);
+    expect(body).toMatchObject({
+      statusCode: 400,
+      path: '/bad-request-fastify',
+      message: 'bad input',
+      requestId: 'req-1-fastify',
     });
   });
 

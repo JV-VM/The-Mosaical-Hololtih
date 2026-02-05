@@ -17,7 +17,13 @@ type RequestWithContext = {
 type ResponseLike = {
   code?: (statusCode: number) => ResponseLike;
   status?: (statusCode: number) => ResponseLike;
-  send: (body: Record<string, unknown>) => void;
+  send?: (body: Record<string, unknown>) => void;
+  json?: (body: Record<string, unknown>) => void;
+  raw?: {
+    statusCode?: number;
+    setHeader?: (name: string, value: string) => void;
+    end?: (body?: string) => void;
+  };
 };
 
 const getHeaderString = (value: unknown): string | undefined => {
@@ -39,21 +45,38 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
     const requestId = request.id ?? headerRequestId;
     const path = request.routeOptions?.url ?? request.url;
 
+    const replyJson = (
+      res: any,
+      status: number,
+      body: Record<string, unknown>,
+    ) => {
+      try {
+        if (typeof res?.code === 'function' && typeof res?.send === 'function') {
+          return res.code(status).send(body);
+        }
+
+        if (typeof res?.status === 'function') {
+          const chained = res.status(status);
+          if (typeof chained?.json === 'function') return chained.json(body);
+          if (typeof chained?.send === 'function') return chained.send(body);
+        }
+
+        const raw = res?.raw ?? res;
+        if (raw && typeof raw.setHeader === 'function' && typeof raw.end === 'function') {
+          raw.statusCode = status;
+          raw.setHeader('content-type', 'application/json; charset=utf-8');
+          return raw.end(JSON.stringify(body));
+        }
+      } catch {
+        // Never throw inside the exception filter.
+      }
+    };
+
     const sendResponse = (
       statusCode: number,
       body: Record<string, unknown>,
     ) => {
-      if (typeof response.code === 'function') {
-        response.code(statusCode).send(body);
-        return;
-      }
-
-      if (typeof response.status === 'function') {
-        response.status(statusCode).send(body);
-        return;
-      }
-
-      response.send(body);
+      replyJson(response, statusCode, body);
     };
 
     if (exception instanceof HttpException) {
