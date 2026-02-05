@@ -18,7 +18,6 @@ primary_region = 'gru'
 
 [deploy]
   release_command = "npx prisma migrate deploy"
-  processes = ['app']
 
 [[vm]]
   memory = '1gb'
